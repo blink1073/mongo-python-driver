@@ -29,4 +29,5 @@ jobs:
       - name: Run doctests
         run: |
           pip install -r doc/docs-requirements.txt
+          pip install gevent
           python setup.py doc -t
