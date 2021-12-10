@@ -27,5 +27,6 @@ jobs:
         run: |
           python setup.py test
       - name: Run doctests
+        run: |
           pip install -r doc/docs-requirements.txt
           python setup.py doc -t
