@@ -42,6 +42,7 @@ authtest () {
 
     cd src
     pip install '.[aws]'
+    python -m pip install https://github.com/mongodb/pymongo-auth-aws/archive/refs/heads/master.zip
     python test/auth_aws/test_auth_aws.py
     cd -
     deactivate
