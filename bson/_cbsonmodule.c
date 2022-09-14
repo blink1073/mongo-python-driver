@@ -1660,6 +1660,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
     case 3:
         {
             uint32_t size;
+            PyObject* view;
 
             if (max < 4) {
                 goto invalid;
@@ -1675,9 +1676,13 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
             }
 
             if (options->is_raw_bson) {
+                // Use a memoryview to avoid creating new memory for the
+                // sub-document.
+                view = PyMemoryView_FromMemory((char *)(buffer + *position), (Py_ssize_t)size, PyBUF_READ);
                 value = PyObject_CallFunction(
-                    options->document_class, "y#O",
-                    buffer + *position, (Py_ssize_t)size, options->options_obj);
+                    options->document_class, "OO",
+                    view, options->options_obj);
+                Py_DECREF(view);
                 if (!value) {
                     goto invalid;
                 }
@@ -2682,8 +2687,7 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
     /* No need to decode fields if using RawBSONDocument */
     if (options.is_raw_bson) {
         result = PyObject_CallFunction(
-            options.document_class, "y#O", string, (Py_ssize_t)size,
-            options_obj);
+            options.document_class, "OO", bson, options_obj);
     }
     else {
         result = elements_to_dict(self, string + 4, (unsigned)size - 5, &options);
@@ -2704,6 +2708,7 @@ static PyObject* _cbson_decode_all(PyObject* self, PyObject* args) {
     codec_options_t options;
     PyObject* options_obj = NULL;
     Py_buffer view = {0};
+    PyObject* memoryview;
 
     if (!PyArg_ParseTuple(args, "OO", &bson, &options_obj)) {
         return NULL;
@@ -2769,9 +2774,11 @@ static PyObject* _cbson_decode_all(PyObject* self, PyObject* args) {
 
         /* No need to decode fields if using RawBSONDocument. */
         if (options.is_raw_bson) {
-            dict = PyObject_CallFunction(
-                options.document_class, "y#O", string, (Py_ssize_t)size,
-                options_obj);
+            // Use a memoryview to avoid creating new memory for the
+            // sub-document.
+            memoryview = PyMemoryView_FromMemory((char *)string, (Py_ssize_t)size, PyBUF_READ);
+            dict = PyObject_CallFunction(options.document_class, "OO", memoryview, options_obj);
+            Py_DECREF(memoryview);
         } else {
             dict = elements_to_dict(self, string + 4, (unsigned)size - 5, &options);
         }

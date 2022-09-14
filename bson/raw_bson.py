@@ -51,7 +51,7 @@ blobs to disk, using raw BSON documents provides better speed and avoids the
 overhead of decoding or encoding BSON.
 """
 
-from typing import Any, ItemsView, Iterator, Mapping, Optional
+from typing import Any, ItemsView, Iterator, Mapping, Optional, Union
 
 from bson import _get_object_size, _raw_to_dict
 from bson.codec_options import _RAW_BSON_DOCUMENT_MARKER
@@ -71,7 +71,9 @@ class RawBSONDocument(Mapping[str, Any]):
     __slots__ = ("__raw", "__inflated_doc", "__codec_options")
     _type_marker = _RAW_BSON_DOCUMENT_MARKER
 
-    def __init__(self, bson_bytes: bytes, codec_options: Optional[CodecOptions] = None) -> None:
+    def __init__(
+        self, bson_bytes: Union[bytes, memoryview], codec_options: Optional[CodecOptions] = None
+    ) -> None:
         """Create a new :class:`RawBSONDocument`
 
         :class:`RawBSONDocument` is a representation of a BSON document that
@@ -156,7 +158,9 @@ class RawBSONDocument(Mapping[str, Any]):
         return "RawBSONDocument(%r, codec_options=%r)" % (self.raw, self.__codec_options)
 
 
-def _inflate_bson(bson_bytes: bytes, codec_options: CodecOptions) -> Mapping[Any, Any]:
+def _inflate_bson(
+    bson_bytes: Union[bytes, memoryview], codec_options: CodecOptions
+) -> Mapping[Any, Any]:
     """Inflates the top level fields of a BSON document.
 
     :Parameters:

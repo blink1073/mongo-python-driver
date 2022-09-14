@@ -234,7 +234,7 @@ def get_data_and_view(data: Any) -> Tuple[Any, memoryview]:
     if isinstance(data, (bytes, bytearray)):
         return data, memoryview(data)
     view = memoryview(data)
-    return view.tobytes(), view
+    return view, view
 
 
 def _raise_unknown_type(element_type: int, element_name: str) -> NoReturn:
@@ -518,6 +518,7 @@ _ELEMENT_GETTER: Dict[int, Callable[..., Tuple[Any, int]]] = {
 
 
 if _USE_C:
+    print("yeah!")
 
     def _element_to_dict(
         data: Any, view: Any, position: int, obj_end: int, opts: CodecOptions
