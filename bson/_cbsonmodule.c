@@ -2518,9 +2518,8 @@ static int _element_to_dict(PyObject* self, const char* string,
 }
 
 static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
-    /* TODO: Support buffer protocol */
     char* string;
-    PyObject* bson;
+    Py_buffer bson;
     codec_options_t options;
     unsigned position;
     unsigned max;
@@ -2529,20 +2528,16 @@ static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
     PyObject* value;
     PyObject* result_tuple;
 
-    if (!PyArg_ParseTuple(args, "OIIO&", &bson, &position, &max,
+    if (!PyArg_ParseTuple(args, "y*IIO&", &bson, &position, &max,
                           convert_codec_options, &options)) {
         return NULL;
     }
 
-    if (!PyBytes_Check(bson)) {
-        PyErr_SetString(PyExc_TypeError, "argument to _element_to_dict must be a bytes object");
-        return NULL;
-    }
-    string = PyBytes_AS_STRING(bson);
-
+    string = (char*)bson.buf;
     new_position = _element_to_dict(self, string, position, max, &options,
                                     &name, &value);
     if (new_position < 0) {
+        PyBuffer_Release(&bson);
         return NULL;
     }
 
@@ -2550,9 +2545,10 @@ static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
     if (!result_tuple) {
         Py_DECREF(name);
         Py_DECREF(value);
+        PyBuffer_Release(&bson);
         return NULL;
     }
-
+    PyBuffer_Release(&bson);
     destroy_codec_options(&options);
     return result_tuple;
 }
