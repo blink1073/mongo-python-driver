@@ -2621,23 +2621,18 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
     int32_t size;
     Py_ssize_t total_size;
     const char* string;
-    PyObject* bson;
+    Py_buffer bson;
     codec_options_t options;
     PyObject* result = NULL;
     PyObject* options_obj;
-    Py_buffer view = {0};
 
-    if (! (PyArg_ParseTuple(args, "OO", &bson, &options_obj) &&
+
+    if (! (PyArg_ParseTuple(args, "y*O", &bson, &options_obj) &&
             convert_codec_options(options_obj, &options))) {
         return result;
     }
 
-    if (!_get_buffer(bson, &view)) {
-        destroy_codec_options(&options);
-        return result;
-    }
-
-    total_size = view.len;
+    total_size = bson.len;
 
     if (total_size < BSON_MIN_SIZE) {
         PyObject* InvalidBSON = _error("InvalidBSON");
@@ -2649,7 +2644,7 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
         goto done;;
     }
 
-    string = (char*)view.buf;
+    string = (char*)bson.buf;
 
     memcpy(&size, string, 4);
     size = (int32_t)BSON_UINT32_FROM_LE(size);
@@ -2683,13 +2678,13 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
     /* No need to decode fields if using RawBSONDocument */
     if (options.is_raw_bson) {
         result = PyObject_CallFunction(
-            options.document_class, "OO", bson, options_obj);
+            options.document_class, "OO", PyMemoryView_FromBuffer(&bson), options_obj);
     }
     else {
         result = elements_to_dict(self, string + 4, (unsigned)size - 5, &options);
     }
 done:
-    PyBuffer_Release(&view);
+    PyBuffer_Release(&bson);
     destroy_codec_options(&options);
     return result;
 }
