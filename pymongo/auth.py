@@ -48,6 +48,7 @@ MECHANISMS = frozenset(
     [
         "GSSAPI",
         "MONGODB-CR",
+        "MONGODB-OIDC",
         "MONGODB-X509",
         "MONGODB-AWS",
         "PLAIN",
@@ -99,9 +100,15 @@ _AWSProperties = namedtuple("_AWSProperties", ["aws_session_token"])
 """Mechanism properties for MONGODB-AWS authentication."""
 
 
+_OIDCProperties = namedtuple(
+    "_OIDCProperties", ["on_oidc_request_token", "on_oidc_refresh_token", "principal_name"]
+)
+"""Mechanism properties for MONGODB-OIDC authentication."""
+
+
 def _build_credentials_tuple(mech, source, user, passwd, extra, database):
     """Build and return a mechanism specific credentials tuple."""
-    if mech not in ("MONGODB-X509", "MONGODB-AWS") and user is None:
+    if mech not in ("MONGODB-X509", "MONGODB-AWS", "MONGODB-OIDC") and user is None:
         raise ConfigurationError("%s requires a username." % (mech,))
     if mech == "GSSAPI":
         if source is not None and source != "$external":
@@ -137,6 +144,20 @@ def _build_credentials_tuple(mech, source, user, passwd, extra, database):
         aws_props = _AWSProperties(aws_session_token=aws_session_token)
         # user can be None for temporary link-local EC2 credentials.
         return MongoCredential(mech, "$external", user, passwd, aws_props, None)
+    elif mech == "MONGODB-OIDC":
+        if source is not None and source != "$external":
+            raise ValueError("authentication source must be $external or None for MONGODB-ODIC")
+        properties = extra.get("authmechanismproperties", {})
+        on_oidc_request_token = properties.get("on_oidc_request_token")
+        on_oidc_refresh_token = properties.get("on_oidc_request_token", on_oidc_request_token)
+        principal_name = properties.get("principal_name")
+        oidc_props = _OIDCProperties(
+            on_oidc_request_token=on_oidc_request_token,
+            on_oidc_refresh_token=on_oidc_refresh_token,
+            principal_name=principal_name,
+        )
+        return MongoCredential(mech, "$eternal", user, passwd, oidc_props, None)
+
     elif mech == "PLAIN":
         source_database = source or database or "$external"
         return MongoCredential(mech, source_database, user, passwd, None, None)
@@ -458,6 +479,61 @@ def _authenticate_mongo_cr(credentials, sock_info):
     sock_info.command(source, query)
 
 
+"""
+interface OIDCRequestTokenParams {
+ authorizeEndpoint?: string;
+ tokenEndpoint?: string;
+ deviceAuthorizeEndpoint?: string;
+ clientId: string;
+ clientSecret?: string;
+ requestScopes?: string[];
+}
+
+interface OIDCRequestTokenResult {
+ accessToken: string;
+}
+"""
+
+
+def _authenticate_oidc(credentials, sock_info):
+    """Authenticate using MONGODB-OIDC."""
+    properties: _OIDCProperties = credentials.mechanism_properties
+
+    # TODO: how to detect if this is a refresh?
+    # TODO: if there are no callbacks, attempt an EKS lookup?
+
+    # Send the SASL start with the optional principal name.
+    nonce = standard_b64encode(os.urandom(32))
+    payload = b"r=" + nonce
+    if properties.principal_name:
+        payload += b",n=" + properties.principal_name.encode("utf-8")
+
+    cmd = SON(
+        [
+            ("saslStart", 1),
+            ("mechanism", "MONGODB-OIDC"),
+            ("payload", Binary(payload)),
+            ("autoAuthorize", 1),
+        ]
+    )
+    response = sock_info.command("$external", cmd)
+    # TODO: inspect this reponse
+    server_payload = response["payload"]
+    client_resp = properties.on_oidc_request_token(server_payload)
+
+    payload = b"jwt=" + client_resp["access_token"].encode("utf-8")
+    cmd = SON(
+        [
+            ("saslContinue", 1),
+            ("conversationId", response["conversationId"]),
+            ("payload", payload),
+        ]
+    )
+    response = sock_info.command("$external", cmd)
+    # TODO: inspect this response
+    pass
+
+
 def _authenticate_default(credentials, sock_info):
     if sock_info.max_wire_version >= 7:
         if sock_info.negotiated_mechs:
@@ -482,6 +558,7 @@ _AUTH_MAP: Mapping[str, Callable] = {
     "MONGODB-CR": _authenticate_mongo_cr,
     "MONGODB-X509": _authenticate_x509,
     "MONGODB-AWS": _authenticate_aws,
+    "MONGODB-OIDC": _authenticate_oidc,
     "PLAIN": _authenticate_plain,
     "SCRAM-SHA-1": functools.partial(_authenticate_scram, mechanism="SCRAM-SHA-1"),
     "SCRAM-SHA-256": functools.partial(_authenticate_scram, mechanism="SCRAM-SHA-256"),
