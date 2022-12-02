@@ -492,8 +492,11 @@ interface OIDCRequestTokenParams {
 
 interface OIDCRequestTokenResult {
  accessToken: string;
+ expiresInSeconds?: number
 }
 """
+
+_oidc_auth_cache = {}
 
 
 def _authenticate_oidc(credentials, sock_info):
@@ -505,8 +508,9 @@ def _authenticate_oidc(credentials, sock_info):
 
     # Send the SASL start with the optional principal name.
     payload = dict()
-    if properties.principal_name:
-        payload["n"] = properties.principal_name
+    principal_name = properties.principal_name
+    if principal_name:
+        payload["n"] = principal_name
 
     cmd = SON(
         [
@@ -518,9 +522,21 @@ def _authenticate_oidc(credentials, sock_info):
     )
     response = sock_info.command("$external", cmd)
     server_payload = bson.decode(response["payload"])
-    client_resp = properties.on_oidc_request_token(server_payload)
 
-    payload = dict(jwt=client_resp["access_token"])
+    if principal_name in _oidc_auth_cache:
+        auth = _oidc_auth_cache[principal_name]
+        # TODO check expires_in_seconds - call refresh callback
+        # if it expired.
+        token = auth["access_token"]
+
+    else:
+        client_resp = properties.on_oidc_request_token(server_payload)
+        token = client_resp["access_token"]
+        if "expires_in_seconds" in client_resp:
+            # TODO check expires_in_seconds
+            _oidc_auth_cache[principal_name] = client_resp
+
+    payload = dict(jwt=token)
     cmd = SON(
         [
             ("saslContinue", 1),
@@ -528,8 +544,15 @@ def _authenticate_oidc(credentials, sock_info):
             ("payload", Binary(bson.encode(payload))),
         ]
     )
-    response = sock_info.command("$external", cmd)
+
+    try:
+        response = sock_info.command("$external", cmd)
+    except Exception:
+        del _oidc_auth_cache[principal_name]
+        raise
+
     if not response["done"]:
+        del _oidc_auth_cache[principal_name]
         raise OperationFailure("SASL conversation failed to complete.")
 
 

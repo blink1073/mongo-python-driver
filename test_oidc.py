@@ -19,6 +19,9 @@ auth_data = dict(
 LOCAL_PORT = 8888
 REDIRECT_URI = f"http://localhost:{LOCAL_PORT}/authorization-code/callback"
 RESPONSE_QUEUE = Queue()
+INIT_CALLED = 0
+REFRESH_CALLED = 0
+TOKEN_AUTH = None
 
 
 class MyRequestHandler(BaseHTTPRequestHandler):
@@ -42,6 +45,8 @@ def run_server():
 
 
 def get_auth_token(auth_data):
+    global INIT_CALLED
+    INIT_CALLED += 1
     client_id = auth_data["clientId"]
     client_secret = auth_data["clientSecret"]
     token_endpoint = auth_data["tokenEndpoint"]
@@ -65,13 +70,14 @@ def get_auth_token(auth_data):
             "code_verifier": response.code_verifier,
         }
     )
-    return dict(access_token=str(token_response.id_token))
+    # import pdb; pdb.set_trace()
+    return dict(access_token=str(token_response.id_token), expires_in=5 * 60 + 5)
 
 
-# TODO: ask about this:
-"""
-{"t":{"$date":"2022-12-02T02:59:32.366+00:00"},"s":"I",  "c":"ACCESS",   "id":20249,   "ctx":"conn30","msg":"Authentication failed","attr":{"mechanism":"MONGODB-OIDC","speculative":false,"principalName":"","authenticationDatabase":"$external","remote":"127.0.0.1:44036","extraInfo":{},"error":"OperationFailed: Unable to validate signatures for keyId: 1loEql49BlI9Bhhw3rKuKaZFAakHIXt2BJCC0dKn-UU"}}
-"""
+def refresh_auth_token(auth_data):
+    # TODO
+    pass
+
 
 thread = threading.Thread(target=run_server, daemon=True)
 thread.start()
