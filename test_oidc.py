@@ -65,8 +65,13 @@ def get_auth_token(auth_data):
             "code_verifier": response.code_verifier,
         }
     )
-    return token_response.access_token
+    return dict(access_token=str(token_response.id_token))
 
+
+# TODO: ask about this:
+"""
+{"t":{"$date":"2022-12-02T02:59:32.366+00:00"},"s":"I",  "c":"ACCESS",   "id":20249,   "ctx":"conn30","msg":"Authentication failed","attr":{"mechanism":"MONGODB-OIDC","speculative":false,"principalName":"","authenticationDatabase":"$external","remote":"127.0.0.1:44036","extraInfo":{},"error":"OperationFailed: Unable to validate signatures for keyId: 1loEql49BlI9Bhhw3rKuKaZFAakHIXt2BJCC0dKn-UU"}}
+"""
 
 thread = threading.Thread(target=run_server, daemon=True)
 thread.start()

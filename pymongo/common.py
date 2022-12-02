@@ -422,6 +422,8 @@ _MECHANISM_PROPS = frozenset(
 
 def validate_auth_mechanism_properties(option: str, value: Any) -> Dict[str, Union[bool, str]]:
     """Validate authMechanismProperties."""
+    if not isinstance(value, str):
+        return value
     value = validate_string(option, value)
     props: Dict[str, Any] = {}
     for opt in value.split(","):

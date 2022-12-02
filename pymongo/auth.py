@@ -24,6 +24,7 @@ from collections import namedtuple
 from typing import Callable, Mapping
 from urllib.parse import quote
 
+import bson
 from bson.binary import Binary
 from bson.son import SON
 from pymongo.auth_aws import _authenticate_aws
@@ -150,7 +151,7 @@ def _build_credentials_tuple(mech, source, user, passwd, extra, database):
         properties = extra.get("authmechanismproperties", {})
         on_oidc_request_token = properties.get("on_oidc_request_token")
         on_oidc_refresh_token = properties.get("on_oidc_request_token", on_oidc_request_token)
-        principal_name = properties.get("principal_name")
+        principal_name = properties.get("principal_name", "")
         oidc_props = _OIDCProperties(
             on_oidc_request_token=on_oidc_request_token,
             on_oidc_refresh_token=on_oidc_refresh_token,
@@ -503,37 +504,33 @@ def _authenticate_oidc(credentials, sock_info):
     # TODO: if there are no callbacks, attempt an EKS lookup?
 
     # Send the SASL start with the optional principal name.
-    nonce = standard_b64encode(os.urandom(32))
-    payload = b"r=" + nonce
+    payload = dict()
     if properties.principal_name:
-        payload += b",n=" + properties.principal_name.encode("utf-8")
+        payload["n"] = properties.principal_name
 
     cmd = SON(
         [
             ("saslStart", 1),
             ("mechanism", "MONGODB-OIDC"),
-            ("payload", Binary(payload)),
+            ("payload", Binary(bson.encode(payload))),
             ("autoAuthorize", 1),
         ]
     )
     response = sock_info.command("$external", cmd)
-    # TODO: inspect this reponse
-    # import pdb; pdb.set_trace()
-    server_payload = response["payload"]
+    server_payload = bson.decode(response["payload"])
     client_resp = properties.on_oidc_request_token(server_payload)
 
-    payload = b"jwt=" + client_resp["access_token"].encode("utf-8")
+    payload = dict(jwt=client_resp["access_token"])
     cmd = SON(
         [
             ("saslContinue", 1),
             ("conversationId", response["conversationId"]),
-            ("payload", payload),
+            ("payload", Binary(bson.encode(payload))),
         ]
     )
     response = sock_info.command("$external", cmd)
-    # TODO: inspect this response
-    # import pdb; pdb.set_trace()
-    pass
+    if not response["done"]:
+        raise OperationFailure("SASL conversation failed to complete.")
 
 
 def _authenticate_default(credentials, sock_info):
