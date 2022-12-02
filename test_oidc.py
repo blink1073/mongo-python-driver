@@ -5,6 +5,8 @@ from queue import Queue
 
 from requests_oauth2client import AuthorizationRequest, OAuth2Client
 
+from pymongo import MongoClient
+
 auth_data = dict(
     authorizeEndpoint="https://corp.mongodb.com/oauth2/v1/authorize",
     tokenEndpoint="https://corp.mongodb.com/oauth2/v1/token",
@@ -14,8 +16,8 @@ auth_data = dict(
 )
 
 
-PORT = 8888
-REDIRECT_URI = f"http://localhost:{PORT}/authorization-code/callback"
+LOCAL_PORT = 8888
+REDIRECT_URI = f"http://localhost:{LOCAL_PORT}/authorization-code/callback"
 RESPONSE_QUEUE = Queue()
 
 
@@ -26,7 +28,7 @@ class MyRequestHandler(BaseHTTPRequestHandler):
 
 
 def run_server():
-    server = HTTPServer(("localhost", PORT), MyRequestHandler)
+    server = HTTPServer(("localhost", LOCAL_PORT), MyRequestHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -68,4 +70,9 @@ def get_auth_token(auth_data):
 
 thread = threading.Thread(target=run_server, daemon=True)
 thread.start()
-print(get_auth_token(auth_data))
+
+# print(get_auth_token(auth_data))
+
+props = dict(on_oidc_request_token=get_auth_token)
+client = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+print(client.test.command("ping"))

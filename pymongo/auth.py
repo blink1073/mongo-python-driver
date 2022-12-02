@@ -518,6 +518,7 @@ def _authenticate_oidc(credentials, sock_info):
     )
     response = sock_info.command("$external", cmd)
     # TODO: inspect this reponse
+    # import pdb; pdb.set_trace()
     server_payload = response["payload"]
     client_resp = properties.on_oidc_request_token(server_payload)
 
@@ -531,6 +532,7 @@ def _authenticate_oidc(credentials, sock_info):
     )
     response = sock_info.command("$external", cmd)
     # TODO: inspect this response
+    # import pdb; pdb.set_trace()
     pass
 
 
