@@ -21,6 +21,7 @@ import os
 import socket
 from base64 import standard_b64decode, standard_b64encode
 from collections import namedtuple
+from datetime import datetime, timezone
 from typing import Callable, Mapping
 from urllib.parse import quote
 
@@ -497,13 +498,13 @@ interface OIDCRequestTokenResult {
 """
 
 _oidc_auth_cache = {}
+_oidc_buffer_seconds = 5 * 60
 
 
 def _authenticate_oidc(credentials, sock_info):
     """Authenticate using MONGODB-OIDC."""
     properties: _OIDCProperties = credentials.mechanism_properties
 
-    # TODO: how to detect if this is a refresh?
     # TODO: if there are no callbacks, attempt an EKS lookup?
 
     # Send the SASL start with the optional principal name.
@@ -525,16 +526,24 @@ def _authenticate_oidc(credentials, sock_info):
 
     if principal_name in _oidc_auth_cache:
         auth = _oidc_auth_cache[principal_name]
-        # TODO check expires_in_seconds - call refresh callback
-        # if it expired.
-        token = auth["access_token"]
+        now_utc = datetime.now(timezone.utc)
+        exp_utc = auth["exp_utc"]
+        if (exp_utc - now_utc).total_seconds() <= _oidc_buffer_seconds:
+            del _oidc_auth_cache[principal_name]
 
+    if principal_name in _oidc_auth_cache:
+        auth = _oidc_auth_cache[principal_name]
+        token = auth["access_token"]
     else:
         client_resp = properties.on_oidc_request_token(server_payload)
         token = client_resp["access_token"]
         if "expires_in_seconds" in client_resp:
-            # TODO check expires_in_seconds
-            _oidc_auth_cache[principal_name] = client_resp
+            expires_in = client_resp["expires_in_seconds"]
+            if expires_in >= _oidc_buffer_seconds:
+                now_utc = datetime.now(timezone.utc)
+                exp_utc = now_utc + expires_in
+                cached_value = dict(access_token=token, exp_utc=exp_utc)
+                _oidc_auth_cache[principal_name] = cached_value
 
     payload = dict(jwt=token)
     cmd = SON(

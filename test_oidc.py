@@ -1,4 +1,5 @@
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from queue import Queue
@@ -45,7 +46,7 @@ def run_server():
 
 
 def get_auth_token(auth_data):
-    global INIT_CALLED
+    global INIT_CALLED, TOKEN_AUTH
     INIT_CALLED += 1
     client_id = auth_data["clientId"]
     client_secret = auth_data["clientSecret"]
@@ -70,13 +71,14 @@ def get_auth_token(auth_data):
             "code_verifier": response.code_verifier,
         }
     )
-    # import pdb; pdb.set_trace()
+    TOKEN_AUTH = token_response.id_token
     return dict(access_token=str(token_response.id_token), expires_in=5 * 60 + 5)
 
 
 def refresh_auth_token(auth_data):
-    # TODO
-    pass
+    global REFRESH_CALLED
+    REFRESH_CALLED += 1
+    return dict(access_token=TOKEN_AUTH, expires_in=10 * 60)
 
 
 thread = threading.Thread(target=run_server, daemon=True)
@@ -84,6 +86,18 @@ thread.start()
 
 # print(get_auth_token(auth_data))
 
+# Test token expiration and refresh
 props = dict(on_oidc_request_token=get_auth_token)
 client = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
 print(client.test.command("ping"))
+assert INIT_CALLED == 1
+time.sleep(6)
+client2 = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+print(client2.test.command("ping"))
+assert INIT_CALLED == 1
+assert REFRESH_CALLED == 1
+time.sleep(6)
+client3 = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+print(client3.test.command("ping"))
+assert INIT_CALLED == 1
+assert REFRESH_CALLED == 1
