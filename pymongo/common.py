@@ -435,6 +435,7 @@ def validate_auth_mechanism_properties(option: str, value: Any) -> Dict[str, Uni
                 if len(signature.parameters) != 1:
                     msg = "Auth mechanisim properity callbacks must accept one value"
                     raise ValueError(msg)
+                props[key] = value
             else:
                 raise ValueError(
                     "Auth mechanisim properity values must be strings or callback functions"

@@ -21,7 +21,7 @@ import os
 import socket
 from base64 import standard_b64decode, standard_b64encode
 from collections import namedtuple
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Mapping
 from urllib.parse import quote
 
@@ -151,7 +151,7 @@ def _build_credentials_tuple(mech, source, user, passwd, extra, database):
             raise ValueError("authentication source must be $external or None for MONGODB-ODIC")
         properties = extra.get("authmechanismproperties", {})
         on_oidc_request_token = properties.get("on_oidc_request_token")
-        on_oidc_refresh_token = properties.get("on_oidc_request_token", on_oidc_request_token)
+        on_oidc_refresh_token = properties.get("on_oidc_refresh_token", on_oidc_request_token)
         principal_name = properties.get("principal_name", "")
         oidc_props = _OIDCProperties(
             on_oidc_request_token=on_oidc_request_token,
@@ -512,6 +512,7 @@ def _authenticate_oidc(credentials, sock_info):
     principal_name = properties.principal_name
     if principal_name:
         payload["n"] = principal_name
+    callback = properties.on_oidc_request_token
 
     cmd = SON(
         [
@@ -530,18 +531,19 @@ def _authenticate_oidc(credentials, sock_info):
         exp_utc = auth["exp_utc"]
         if (exp_utc - now_utc).total_seconds() <= _oidc_buffer_seconds:
             del _oidc_auth_cache[principal_name]
+            callback = properties.on_oidc_refresh_token
 
     if principal_name in _oidc_auth_cache:
         auth = _oidc_auth_cache[principal_name]
         token = auth["access_token"]
     else:
-        client_resp = properties.on_oidc_request_token(server_payload)
+        client_resp = callback(server_payload)
         token = client_resp["access_token"]
         if "expires_in_seconds" in client_resp:
             expires_in = client_resp["expires_in_seconds"]
             if expires_in >= _oidc_buffer_seconds:
                 now_utc = datetime.now(timezone.utc)
-                exp_utc = now_utc + expires_in
+                exp_utc = now_utc + timedelta(seconds=expires_in)
                 cached_value = dict(access_token=token, exp_utc=exp_utc)
                 _oidc_auth_cache[principal_name] = cached_value
 
