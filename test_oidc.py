@@ -22,7 +22,6 @@ REDIRECT_URI = f"http://localhost:{LOCAL_PORT}/authorization-code/callback"
 RESPONSE_QUEUE = Queue()
 INIT_CALLED = 0
 REFRESH_CALLED = 0
-TOKEN_AUTH = None
 
 
 class MyRequestHandler(BaseHTTPRequestHandler):
@@ -47,7 +46,7 @@ def run_server():
 
 def get_auth_token(auth_data):
     print("Getting auth token")
-    global INIT_CALLED, TOKEN_AUTH
+    global INIT_CALLED
     INIT_CALLED += 1
     client_id = auth_data["clientId"]
     client_secret = auth_data["clientSecret"]
@@ -72,15 +71,15 @@ def get_auth_token(auth_data):
             "code_verifier": response.code_verifier,
         }
     )
-    TOKEN_AUTH = str(token_response.id_token)
     return dict(access_token=str(token_response.id_token), expires_in_seconds=5 * 60 + 3)
 
 
-def refresh_auth_token(auth_data):
+def refresh_auth_token(auth_data, orig_data):
     global REFRESH_CALLED
     REFRESH_CALLED += 1
     print("Refreshing auth token")
-    return dict(access_token=TOKEN_AUTH, expires_in_seconds=10 * 60)
+    access_token = orig_data["access_token"]
+    return dict(access_token=access_token, expires_in_seconds=10 * 60)
 
 
 thread = threading.Thread(target=run_server, daemon=True)

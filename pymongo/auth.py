@@ -492,12 +492,16 @@ interface OIDCRequestTokenParams {
 }
 
 interface OIDCRequestTokenResult {
- accessToken: string;
+ accessToken: string
  expiresInSeconds?: number
+ refreshToken?: string
 }
 """
 
 _oidc_auth_cache = {}
+_oidc_exp_utc = {}
+# TODO: Offer another parameter that is the refresh buffer?
+# TOOD: Make a dataclass for the client resp and the internal storage
 _oidc_buffer_seconds = 5 * 60
 
 
@@ -505,14 +509,11 @@ def _authenticate_oidc(credentials, sock_info):
     """Authenticate using MONGODB-OIDC."""
     properties: _OIDCProperties = credentials.mechanism_properties
 
-    # TODO: if there are no callbacks, attempt an EKS lookup?
-
     # Send the SASL start with the optional principal name.
     payload = dict()
     principal_name = properties.principal_name
     if principal_name:
         payload["n"] = principal_name
-    callback = properties.on_oidc_request_token
 
     cmd = SON(
         [
@@ -524,28 +525,34 @@ def _authenticate_oidc(credentials, sock_info):
     )
     response = sock_info.command("$external", cmd)
     server_payload = bson.decode(response["payload"])
+    client_resp = None
+    token = None
 
     if principal_name in _oidc_auth_cache:
         auth = _oidc_auth_cache[principal_name]
         now_utc = datetime.now(timezone.utc)
-        exp_utc = auth["exp_utc"]
+        exp_utc = _oidc_exp_utc[principal_name]
         if (exp_utc - now_utc).total_seconds() <= _oidc_buffer_seconds:
             del _oidc_auth_cache[principal_name]
-            callback = properties.on_oidc_refresh_token
+            if properties.on_oidc_refresh_token:
+                client_resp = properties.on_oidc_refresh_token(server_payload, auth)
 
-    if principal_name in _oidc_auth_cache:
-        auth = _oidc_auth_cache[principal_name]
-        token = auth["access_token"]
-    else:
-        client_resp = callback(server_payload)
+    if client_resp is None:
+        if principal_name in _oidc_auth_cache:
+            auth = _oidc_auth_cache[principal_name]
+            token = auth["access_token"]
+        else:
+            client_resp = properties.on_oidc_request_token(server_payload)
+
+    if client_resp is not None:
         token = client_resp["access_token"]
         if "expires_in_seconds" in client_resp:
             expires_in = client_resp["expires_in_seconds"]
             if expires_in >= _oidc_buffer_seconds:
                 now_utc = datetime.now(timezone.utc)
                 exp_utc = now_utc + timedelta(seconds=expires_in)
-                cached_value = dict(access_token=token, exp_utc=exp_utc)
-                _oidc_auth_cache[principal_name] = cached_value
+                _oidc_exp_utc[principal_name] = exp_utc
+                _oidc_auth_cache[principal_name] = client_resp.copy()
 
     payload = dict(jwt=token)
     cmd = SON(

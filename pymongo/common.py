@@ -432,8 +432,8 @@ def validate_auth_mechanism_properties(option: str, value: Any) -> Dict[str, Uni
                 props[key] = value
             elif inspect.isfunction(value):
                 signature = inspect.signature(value)
-                if len(signature.parameters) != 1:
-                    msg = "Auth mechanisim properity callbacks must accept one value"
+                if len(signature.parameters) == 0:
+                    msg = "Auth mechanisim properity callbacks must accept at least one value"
                     raise ValueError(msg)
                 props[key] = value
             else:
