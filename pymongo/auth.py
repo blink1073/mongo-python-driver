@@ -158,7 +158,7 @@ def _build_credentials_tuple(mech, source, user, passwd, extra, database):
             on_oidc_refresh_token=on_oidc_refresh_token,
             principal_name=principal_name,
         )
-        return MongoCredential(mech, "$eternal", user, passwd, oidc_props, None)
+        return MongoCredential(mech, "$external", user, passwd, oidc_props, None)
 
     elif mech == "PLAIN":
         source_database = source or database or "$external"
@@ -537,7 +537,7 @@ def _authenticate_oidc(credentials, sock_info):
             if properties.on_oidc_refresh_token:
                 client_resp = properties.on_oidc_refresh_token(server_payload, auth)
 
-    if client_resp is None:
+    if client_resp is None and properties.on_oidc_request_token is not None:
         if principal_name in _oidc_auth_cache:
             auth = _oidc_auth_cache[principal_name]
             token = auth["access_token"]
@@ -554,6 +554,11 @@ def _authenticate_oidc(credentials, sock_info):
                 _oidc_exp_utc[principal_name] = exp_utc
                 _oidc_auth_cache[principal_name] = client_resp.copy()
 
+    else:
+        aws_identity_file = os.environ["AWS_WEB_IDENTITY_TOKEN_FILE"]
+        with open(aws_identity_file) as fid:
+            token = fid.read().strip()
+
     payload = dict(jwt=token)
     cmd = SON(
         [
@@ -566,7 +571,8 @@ def _authenticate_oidc(credentials, sock_info):
     try:
         response = sock_info.command("$external", cmd)
     except Exception:
-        del _oidc_auth_cache[principal_name]
+        if principal_name in _oidc_auth_cache:
+            del _oidc_auth_cache[principal_name]
         raise
 
     if not response["done"]:

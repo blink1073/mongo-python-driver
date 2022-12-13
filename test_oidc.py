@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 import webbrowser
@@ -41,7 +42,7 @@ def run_server():
 
 
 # Start a server on 8888 and expose a callback endpoint
-# the tunnel address will be different
+# the tunnel address will be 8889
 
 
 def get_auth_token(auth_data):
@@ -71,6 +72,8 @@ def get_auth_token(auth_data):
             "code_verifier": response.code_verifier,
         }
     )
+    print("token:")
+    print(str(token_response.id_token))
     return dict(access_token=str(token_response.id_token), expires_in_seconds=5 * 60 + 3)
 
 
@@ -87,20 +90,28 @@ thread.start()
 
 # print(get_auth_token(auth_data))
 
-# Test token expiration and refresh
-props = dict(on_oidc_request_token=get_auth_token, on_oidc_refresh_token=refresh_auth_token)
-client = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
-print(client.test.command("ping"))
-assert INIT_CALLED == 1
-print("Sleeping...")
-time.sleep(4)
-client2 = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
-print(client2.test.command("ping"))
-assert INIT_CALLED == 1
-assert REFRESH_CALLED == 1
-print("Sleeping...")
-time.sleep(2)
-client3 = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
-print(client3.test.command("ping"))
-assert INIT_CALLED == 1
-assert REFRESH_CALLED == 1
+# AWS device workflow test.
+if "AWS_WEB_IDENTITY_TOKEN_FILE" in os.environ:
+    props = dict()
+    client = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+    print(client.test.command("ping"))
+
+# Browser workflow test.
+else:
+    # Test token expiration and refresh
+    props = dict(on_oidc_request_token=get_auth_token, on_oidc_refresh_token=refresh_auth_token)
+    client = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+    print(client.test.command("ping"))
+    assert INIT_CALLED == 1
+    print("Sleeping...")
+    time.sleep(4)
+    client2 = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+    print(client2.test.command("ping"))
+    assert INIT_CALLED == 1
+    assert REFRESH_CALLED == 1
+    print("Sleeping...")
+    time.sleep(2)
+    client3 = MongoClient(port=8889, authmechanismproperties=props, authmechanism="MONGODB-OIDC")
+    print(client3.test.command("ping"))
+    assert INIT_CALLED == 1
+    assert REFRESH_CALLED == 1
