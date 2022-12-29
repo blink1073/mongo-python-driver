@@ -58,7 +58,7 @@ file:
 file's contents by calling :meth:`~gridfs.grid_file.GridOut.read`.
 
 In addition to putting a :class:`str` as a GridFS file, we can also
-put any file-like object (an object with a :meth:`read`
+put any file-like object (an object with a ``read``
 method). GridFS will handle reading the file in chunk-sized segments
 automatically. We can also add additional attributes to the file as
 keyword arguments:

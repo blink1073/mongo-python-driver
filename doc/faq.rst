@@ -352,7 +352,7 @@ MongoDB doesn't support custom timeouts for cursors, but cursor
 timeouts can be turned off entirely. Pass ``no_cursor_timeout=True`` to
 :meth:`~pymongo.collection.Collection.find`.
 
-How can I store :mod:`decimal.Decimal` instances?
+How can I store :obj:`decimal.Decimal` instances?
 -------------------------------------------------
 
 PyMongo >= 3.4 supports the Decimal128 BSON type introduced in MongoDB 3.4.
@@ -409,12 +409,12 @@ What is the correct way to handle time zones with PyMongo?
 See :doc:`examples/datetimes` for examples on how to handle
 :class:`~datetime.datetime` objects correctly.
 
-How can I save a :mod:`datetime.date` instance?
+How can I save a :obj:`datetime.date` instance?
 -----------------------------------------------
-PyMongo doesn't support saving :mod:`datetime.date` instances, since
+PyMongo doesn't support saving :obj:`datetime.date` instances, since
 there is no BSON type for dates without times. Rather than having the
-driver enforce a convention for converting :mod:`datetime.date`
-instances to :mod:`datetime.datetime` instances for you, any
+driver enforce a convention for converting :obj:`datetime.date`
+instances to :obj:`datetime.datetime` instances for you, any
 conversion should be performed in your client code.
 
 .. _web-application-querying-by-objectid:
@@ -455,7 +455,7 @@ in Flask_ (other web frameworks are similar)::
 How can I use PyMongo from Django?
 ----------------------------------
 `Django <http://www.djangoproject.com/>`_ is a popular Python web
-framework. Django includes an ORM, :mod:`django.db`. Currently,
+framework. Django includes an ORM, ``django.db``. Currently,
 there's no official MongoDB backend for Django.
 
 `django-mongodb-engine <https://django-mongodb-engine.readthedocs.io/>`_
@@ -466,14 +466,14 @@ and session frameworks and caching.
 
 However, it's easy to use MongoDB (and PyMongo) from Django
 without using a Django backend. Certain features of Django that require
-:mod:`django.db` (admin, authentication and sessions) will not work
+``django.db`` (admin, authentication and sessions) will not work
 using just MongoDB, but most of what Django provides can still be
 used.
 
 One project which should make working with MongoDB and Django easier
 is `mango <http://github.com/vpulim/mango>`_. Mango is a set of
 MongoDB backends for Django sessions and authentication (bypassing
-:mod:`django.db` entirely).
+``django.db`` entirely).
 
 .. _using-with-mod-wsgi:
 
@@ -520,7 +520,7 @@ be specified using the ``datetime_conversion`` parameter of
 The default option is
 :attr:`~bson.codec_options.DatetimeConversion.DATETIME`, which will
 attempt to decode as a :class:`datetime.datetime`, allowing
-:class:`~builtin.OverflowError` to occur upon out-of-range dates.
+:class:`~OverflowError` to occur upon out-of-range dates.
 :attr:`~bson.codec_options.DatetimeConversion.DATETIME_AUTO` alters
 this behavior to instead return :class:`~bson.datetime_ms.DatetimeMS` when
 representations are out-of-range, while returning :class:`~datetime.datetime`

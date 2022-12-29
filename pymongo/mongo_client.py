@@ -344,7 +344,6 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             :meth:`~pymongo.collection.Collection.find_one`,
             :meth:`~pymongo.collection.Collection.aggregate` without ``$out``,
             :meth:`~pymongo.collection.Collection.distinct`,
-            :meth:`~pymongo.collection.Collection.count`,
             :meth:`~pymongo.collection.Collection.estimated_document_count`,
             :meth:`~pymongo.collection.Collection.count_documents`,
             :meth:`pymongo.collection.Collection.watch`,
@@ -627,7 +626,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
            :class:`~pymongo.mongo_client.MongoClient` is now the one and only
            client class for a standalone server, mongos, or replica set.
            It includes the functionality that had been split into
-           :class:`~pymongo.mongo_client.MongoReplicaSetClient`: it can connect
+          ``MongoReplicaSetClient``: it can connect
            to a replica set, discover all its members, and monitor the set for
            stepdowns, elections, and reconfigs.
 
@@ -669,8 +668,8 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
            The ``copy_database`` method is removed, see the
            :doc:`copy_database examples </examples/copydb>` for alternatives.
 
-           The :meth:`MongoClient.disconnect` method is removed; it was a
-           synonym for :meth:`~pymongo.MongoClient.close`.
+           The :meth:`~pymongo.mongo_client.MongoClient.disconnect` method is removed; it was a
+           synonym for :meth:`~pymongo.mongo_client.MongoClient.close`.
 
            :class:`~pymongo.mongo_client.MongoClient` no longer returns an
            instance of :class:`~pymongo.database.Database` for attribute names
@@ -1708,9 +1707,9 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
         :mod:`~pymongo.client_session` module for details and examples.
 
         A :class:`~pymongo.client_session.ClientSession` may only be used with
-        the MongoClient that started it. :class:`ClientSession` instances are
+        the MongoClient that started it. :class:`~pymongo.client_session.ClientSession` instances are
         **not thread-safe or fork-safe**. They can only be used by one thread
-        or process at a time. A single :class:`ClientSession` cannot be used
+        or process at a time. A single :class:`~pymongo.client_session.ClientSession` cannot be used
         to run multiple operations concurrently.
 
         :Returns:
@@ -1882,7 +1881,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
         """Drop a database.
 
         Raises :class:`TypeError` if `name_or_database` is not an instance of
-        :class:`basestring` (:class:`str` in python 3) or
+        ``basestring`` (:class:`str` in python 3) or
         :class:`~pymongo.database.Database`.
 
         :Parameters:

@@ -373,7 +373,7 @@ class PoolOptions(object):
     def non_default_options(self):
         """The non-default options this pool was created with.
 
-        Added for CMAP's :class:`PoolCreatedEvent`.
+        Added for CMAP's :class:`pymongo.monitoring.PoolCreatedEvent`.
         """
         opts = {}
         if self.__max_pool_size != MAX_POOL_SIZE:

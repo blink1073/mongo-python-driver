@@ -3,8 +3,8 @@ Periodic Executors
 
 .. currentmodule:: pymongo
 
-PyMongo implements a :class:`~periodic_executor.PeriodicExecutor` for two
-purposes: as the background thread for :class:`~monitor.Monitor`, and to
+PyMongo implements a ``PeriodicExecutor`` for two
+purposes: as the background thread for ``Monitor``, and to
 regularly check if there are `OP_KILL_CURSORS` messages that must be sent to the server.
 
 Killing Cursors
@@ -23,7 +23,7 @@ destructor (see `PYTHON-799`_), so we cannot safely use the PyMongo data
 structures required to send a message. The solution is to add the cursor's id
 to an array on the :class:`~mongo_client.MongoClient` without taking any locks.
 
-Each client has a :class:`~periodic_executor.PeriodicExecutor` devoted to
+Each client has a ``PeriodicExecutor`` devoted to
 checking the array for cursor ids. Any it sees are the result of cursors that
 were freed while the server-side cursor was still open. The executor can safely
 take the locks it needs in order to send the `OP_KILL_CURSORS` message.
@@ -34,10 +34,10 @@ Stopping Executors
 ------------------
 
 Just as :class:`~cursor.Cursor` must not take any locks from its destructor,
-neither can :class:`~mongo_client.MongoClient` and :class:`~topology.Topology`.
-Thus, although the client calls :meth:`close` on its kill-cursors thread, and
-the topology calls :meth:`close` on all its monitor threads, the :meth:`close`
-method cannot actually call :meth:`wake` on the executor, since :meth:`wake`
+neither can :class:`~mongo_client.MongoClient` and ``Topology``.
+Thus, although the client calls ``close`` on its kill-cursors thread, and
+the topology calls ``close`` on all its monitor threads, the ``close``
+method cannot actually call ``wake`` on the executor, since ``wake``
 takes a lock.
 
 Instead, executors wake periodically to check if ``self.close`` is set,
@@ -56,7 +56,7 @@ tries (with a short timeout) to join all executor threads.
 Monitoring
 ----------
 
-For each server in the topology, :class:`~topology.Topology` uses a periodic
+For each server in the topology, ``Topology`` uses a periodic
 executor to launch a monitor thread. This thread must not prevent the topology
 from being freed, so it weakrefs the topology. Furthermore, it uses a weakref
 callback to terminate itself soon after the topology is freed.

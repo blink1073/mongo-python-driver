@@ -146,9 +146,9 @@ There are three approaches to this:
 
   2. Specify `_id` explicitly. This will mean that every instance of your custom TypedDict class will have to pass a value for `_id`.
 
-  3. Make use of :py:class:`~typing.NotRequired`. This has the flexibility of option 1, but with the ability to access the `_id` field without causing a type-checking error.
+  3. Make use of :py:obj:`~typing.NotRequired`. This has the flexibility of option 1, but with the ability to access the `_id` field without causing a type-checking error.
 
-Note: to use :py:class:`~typing.TypedDict` and :py:class:`~typing.NotRequired` in earlier versions of Python (<3.8, <3.11), use the `typing_extensions` package.
+Note: to use :py:class:`~typing.TypedDict` and :py:obj:`~typing.NotRequired` in earlier versions of Python (<3.8, <3.11), use the `typing_extensions` package.
 
 .. doctest:: typed-dict-example
   :pyversion: >= 3.11
