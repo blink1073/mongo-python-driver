@@ -98,7 +98,7 @@ functions:
             # If this was a patch build, doing a fresh clone would not actually test the patch
             cp -R ${PROJECT_DIRECTORY}/ $DRIVERS_TOOLS
           else
-            git clone https://github.com/mongodb-labs/drivers-evergreen-tools.git $DRIVERS_TOOLS
+            git clone https://github.com/alcaeus/drivers-evergreen-tools.git --branch=drivers-2328-for-perf-testing --depth 1 $DRIVERS_TOOLS
           fi
           echo "{ \"releases\": { \"default\": \"$MONGODB_BINARIES\" }}" > $MONGO_ORCHESTRATION_HOME/orchestration.config
 
@@ -293,6 +293,7 @@ functions:
 
           ${PREPARE_SHELL}
           MONGODB_VERSION=${VERSION} \
+            SKIP_LEGACY_SHELL=1
             TOPOLOGY=${TOPOLOGY} \
             AUTH=${AUTH} \
             SSL=${SSL} \
