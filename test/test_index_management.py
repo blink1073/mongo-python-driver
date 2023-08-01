@@ -55,16 +55,14 @@ class TestCreateSearchIndex(IntegrationTest):
 
 
 class TestSearchIndexProse(IntegrationTest):
+    @classmethod
     @client_context.require_version_min(7, 0, -1)
-    def setUp(self) -> None:
-        super().setUp()
-        uri = os.environ["MONGODB_URI"]
-        username = os.environ["DRIVERS_ATLAS_LAMBDA_USER"]
-        password = os.environ["DRIVERS_ATLAS_LAMBDA_PASSWORD"]
-        self.client_test = MongoClient(uri, username=username, password=password)
-        self.client_test.drop_database("test_search_index_prose")
-        self.db = self.client_test.test_search_index_prose
-        self.addCleanup(self.client_test.close)
+    def setUpClass(cls) -> None:
+        if not os.environ.get("TEST_INDEX_MANAGEMENT"):
+            unittest.skip("Skipping index management tests")
+        super().setUpClass()
+        cls.client.drop_database("test_search_index_prose")
+        cls.db = cls.client.test_search_index_prose
 
     @client_context.require_version_min(7, 0, -1)
     def test_case_1(self):

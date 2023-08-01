@@ -440,6 +440,7 @@ functions:
       type: test
       params:
         working_dir: "src"
+        add_expansions_to_env: true
         script: |
           if [ -n "${set_xtrace_on}" ]; then
             set -o xtrace
@@ -1288,6 +1289,34 @@ task_groups:
     tasks:
     - testazurekms-task
 
+  - name: test_atlas_task_group_search_indexes
+    setup_group:
+      - func: fetch source
+      - command: subprocess.exec
+        params:
+          working_dir: src
+          binary: bash
+          add_expansions_to_env: true
+          env:
+            MONGODB_VERSION: "7.0"
+          args:
+            - ${DRIVERS_TOOLS}/.evergreen/atlas/setup-atlas-cluster.sh
+      - command: expansions.update
+        params:
+          file: src/atlas-expansion.yml
+    teardown_group:
+      - command: subprocess.exec
+        params:
+          working_dir: src
+          binary: bash
+          add_expansions_to_env: true
+          args:
+            - ${DRIVERS_TOOLS}/.evergreen/atlas/teardown-atlas-cluster.sh
+    setup_group_can_fail_task: true
+    setup_group_timeout_secs: 1800
+    tasks:
+      - test-search-index-helpers
+
 tasks:
     # Wildcard task. Do you need to find out what tools are available and where?
     # Throw it here, and execute this task on all buildvariants
@@ -1660,6 +1689,13 @@ tasks:
             VERSION: "latest"
             TOPOLOGY: "server"
         - func: "run enterprise auth tests"
+
+    - name: "test-search-index-helpers"
+      commands:
+        - func: "run tests"
+          vars:
+            TEST_INDEX_MANAGEMENT: "1"
+            AUTH: "auth"
 
     - name: "mod-wsgi-standalone"
       tags: ["mod_wsgi"]

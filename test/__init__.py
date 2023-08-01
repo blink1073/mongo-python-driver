@@ -284,6 +284,8 @@ class ClientContext:
         self.is_data_lake = False
         self.load_balancer = TEST_LOADBALANCER
         self.serverless = TEST_SERVERLESS
+        if os.environ.get("TEST_INDEX_MANAGEMENT"):
+            self.auth_enabled = True
         if self.load_balancer or self.serverless:
             self.default_client_options["loadBalanced"] = True
         if COMPRESSORS:
@@ -393,8 +395,11 @@ class ClientContext:
             if self.auth_enabled:
                 if not self.serverless:
                     # See if db_user already exists.
-                    if not self._check_user_provided():
-                        _create_user(self.client.admin, db_user, db_pwd)
+                    try:
+                        if not self._check_user_provided():
+                            _create_user(self.client.admin, db_user, db_pwd)
+                    except pymongo.errors.OperationFailure:
+                        pass
 
                 self.client = self._connect(
                     host,
