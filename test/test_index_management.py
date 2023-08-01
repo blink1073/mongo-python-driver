@@ -28,6 +28,7 @@ from test import IntegrationTest, client_context, unittest
 from test.unified_format import generate_test_classes
 from test.utils import rs_or_single_client
 
+from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 from pymongo.operations import SearchIndexModel
 
@@ -55,16 +56,17 @@ class TestCreateSearchIndex(IntegrationTest):
 
 class TestSearchIndexProse(IntegrationTest):
     @client_context.require_version_min(7, 0, -1)
-    @client_context.require_serverless
     def setUp(self) -> None:
         super().setUp()
-        self.client_test = rs_or_single_client()
+        uri = os.environ["MONGODB_URI"]
+        username = os.environ["DRIVERS_ATLAS_LAMBDA_USER"]
+        password = os.environ["DRIVERS_ATLAS_LAMBDA_PASSWORD"]
+        self.client_test = MongoClient(uri, username=username, password=password)
         self.client_test.drop_database("test_search_index_prose")
         self.db = self.client_test.test_search_index_prose
         self.addCleanup(self.client_test.close)
 
     @client_context.require_version_min(7, 0, -1)
-    @client_context.require_serverless
     def test_case_1(self):
         """Driver can successfully create and list search indexes."""
 
@@ -73,10 +75,11 @@ class TestSearchIndexProse(IntegrationTest):
 
         # Create a new search index on ``coll0`` with the ``createSearchIndex`` helper.  Use the following definition:
         model = {"name": "test-search-index", "definition": {"mappings": {"dynamic": False}}}
+        coll0.insert_one({})
         resp = coll0.create_search_index(model)
 
         # Assert that the command returns the name of the index: ``"test-search-index"``.
-        self.assertEquals(resp, "test-search-index")
+        self.assertEqual(resp, "test-search-index")
 
         # Run ``coll0.listSearchIndexes()`` repeatedly every 5 seconds until the following condition is satisfied and store the value in a variable ``index``:
         # An index with the ``name`` of ``test-search-index`` is present and the index has a field ``queryable`` with a value of ``true``.
@@ -90,15 +93,15 @@ class TestSearchIndexProse(IntegrationTest):
         # . Assert that ``index`` has a property ``latestDefinition`` whose value is ``{ 'mappings': { 'dynamic': false } }``
         index = indices[0]
         self.assertIn("latestDefinition", index)
-        self.assertEquals(index["latestDefinition"], model["definition"])
+        self.assertEqual(index["latestDefinition"], model["definition"])
 
     @client_context.require_version_min(7, 0, -1)
-    @client_context.require_serverless
     def test_case_2(self):
         """Driver can successfully create multiple indexes in batch."""
 
         # Create a collection with the "create" command using a randomly generated name (referred to as ``coll0``).
         coll0 = self.db[f"col{uuid.uuid4()}"]
+        coll0.insert_one({})
 
         # Create two new search indexes on ``coll0`` with the ``createSearchIndexes`` helper.
         name1 = "test-search-index-1"
@@ -108,7 +111,9 @@ class TestSearchIndexProse(IntegrationTest):
             {"name": name1, "definition": definition},
             {"name": name2, "definition": definition},
         ]
-        coll0.create_search_indexes([SearchIndexModel(i) for i in index_definitions])
+        coll0.create_search_indexes(
+            [SearchIndexModel(i["definition"], i["name"]) for i in index_definitions]
+        )
 
         # .Assert that the command returns an array containing the new indexes' names: ``["test-search-index-1", "test-search-index-2"]``.
         indices = list(coll0.list_search_indexes())
@@ -137,19 +142,19 @@ class TestSearchIndexProse(IntegrationTest):
             self.assertEqual(index["latestDefinition"], definition)
 
     @client_context.require_version_min(7, 0, -1)
-    @client_context.require_serverless
     def test_case_3(self):
         """Driver can successfully drop search indexes."""
 
         # Create a collection with the "create" command using a randomly generated name (referred to as ``coll0``).
         coll0 = self.db[f"col{uuid.uuid4()}"]
+        coll0.insert_one({})
 
         # Create a new search index on ``coll0``.
         model = {"name": "test-search-index", "definition": {"mappings": {"dynamic": False}}}
         resp = coll0.create_search_index(model)
 
         # Assert that the command returns the name of the index: ``"test-search-index"``.
-        self.assertEquals(resp, "test-search-index")
+        self.assertEqual(resp, "test-search-index")
 
         # Run ``coll0.listSearchIndexes()`` repeatedly every 5 seconds until the following condition is satisfied:
         #   An index with the ``name`` of ``test-search-index`` is present and index has a field ``queryable`` with the value of ``true``.
@@ -173,11 +178,11 @@ class TestSearchIndexProse(IntegrationTest):
             time.sleep(5)
 
     @client_context.require_version_min(7, 0, -1)
-    @client_context.require_serverless
     def test_case_4(self):
         """Driver can update a search index."""
         # Create a collection with the "create" command using a randomly generated name (referred to as ``coll0``).
         coll0 = self.db[f"col{uuid.uuid4()}"]
+        coll0.insert_one({})
 
         # Create a new search index on ``coll0``.
         name = "test-search-index"
@@ -185,7 +190,7 @@ class TestSearchIndexProse(IntegrationTest):
         resp = coll0.create_search_index(model)
 
         # Assert that the command returns the name of the index: ``"test-search-index"``.
-        self.assertEquals(resp, name)
+        self.assertEqual(resp, name)
 
         # Run ``coll0.listSearchIndexes()`` repeatedly every 5 seconds until the following condition is satisfied:
         #  An index with the ``name`` of ``test-search-index`` is present and index has a field ``queryable`` with the value of ``true``.
@@ -221,7 +226,6 @@ class TestSearchIndexProse(IntegrationTest):
         self.assertEqual(index["latestDefinition"], model2["definition"])
 
     @client_context.require_version_min(7, 0, -1)
-    @client_context.require_serverless
     def test_case_5(self):
         """``dropSearchIndex`` suppresses namespace not found errors."""
         # Create a driver-side collection object for a randomly generated collection name.  Do not create this collection on the server.
@@ -231,12 +235,12 @@ class TestSearchIndexProse(IntegrationTest):
         coll0.drop_search_index("foo")
 
 
-globals().update(
-    generate_test_classes(
-        _TEST_PATH,
-        module=__name__,
-    )
-)
+# globals().update(
+#     generate_test_classes(
+#         _TEST_PATH,
+#         module=__name__,
+#     )
+# )
 
 if __name__ == "__main__":
     unittest.main()
