@@ -46,10 +46,6 @@ if [ "$AUTH" != "noauth" ]; then
     if [ ! -z "$DATA_LAKE" ]; then
         export DB_USER="mhuser"
         export DB_PASSWORD="pencil"
-    elif [ ! -z "$TEST_INDEX_MANAGEMENT" ]; then
-        export DB_IP=$MONGODB_URI
-        export DB_USER=$DRIVERS_ATLAS_LAMBDA_USER
-        export DB_PASSWORD=$DRIVERS_ATLAS_LAMBDA_PASSWORD
     elif [ ! -z "$TEST_SERVERLESS" ]; then
         export DB_USER=$SERVERLESS_ATLAS_USER
         export DB_PASSWORD=$SERVERLESS_ATLAS_PASSWORD

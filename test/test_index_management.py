@@ -36,10 +36,12 @@ _TEST_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "index_ma
 
 
 class TestCreateSearchIndex(IntegrationTest):
-    @client_context.require_version_min(7, 0, -1)
-    @client_context.require_no_serverless
     def test_inputs(self):
-        coll = self.client.test.test
+        if not os.environ.get("TEST_INDEX_MANAGEMENT"):
+            raise unittest.SkipTest("Skipping index management tests")
+        client = MongoClient()
+        self.addCleanup(client.close)
+        coll = client.test.test
         coll.drop()
         definition = dict(mappings=dict(dynamic=True))
         model_kwarg_list: list[Mapping[str, Any]] = [
@@ -56,15 +58,17 @@ class TestCreateSearchIndex(IntegrationTest):
 
 class TestSearchIndexProse(IntegrationTest):
     @classmethod
-    @client_context.require_version_min(7, 0, -1)
     def setUpClass(cls) -> None:
         if not os.environ.get("TEST_INDEX_MANAGEMENT"):
-            unittest.skip("Skipping index management tests")
+            raise unittest.SkipTest("Skipping index management tests")
+        url = os.environ.get("MONGODB_URI")
+        username = os.environ.get("DB_USER")
+        password = os.environ.get("DB_PASSWORD")
         super().setUpClass()
+        cls.client = MongoClient(url, username=username, password=password)
         cls.client.drop_database("test_search_index_prose")
         cls.db = cls.client.test_search_index_prose
 
-    @client_context.require_version_min(7, 0, -1)
     def test_case_1(self):
         """Driver can successfully create and list search indexes."""
 
@@ -93,7 +97,6 @@ class TestSearchIndexProse(IntegrationTest):
         self.assertIn("latestDefinition", index)
         self.assertEqual(index["latestDefinition"], model["definition"])
 
-    @client_context.require_version_min(7, 0, -1)
     def test_case_2(self):
         """Driver can successfully create multiple indexes in batch."""
 
@@ -139,7 +142,6 @@ class TestSearchIndexProse(IntegrationTest):
             self.assertIn("latestDefinition", index)
             self.assertEqual(index["latestDefinition"], definition)
 
-    @client_context.require_version_min(7, 0, -1)
     def test_case_3(self):
         """Driver can successfully drop search indexes."""
 
@@ -175,7 +177,6 @@ class TestSearchIndexProse(IntegrationTest):
                 raise TimeoutError("Timed out waiting for index deletion")
             time.sleep(5)
 
-    @client_context.require_version_min(7, 0, -1)
     def test_case_4(self):
         """Driver can update a search index."""
         # Create a collection with the "create" command using a randomly generated name (referred to as ``coll0``).
@@ -223,7 +224,6 @@ class TestSearchIndexProse(IntegrationTest):
         self.assertIn("latestDefinition", index)
         self.assertEqual(index["latestDefinition"], model2["definition"])
 
-    @client_context.require_version_min(7, 0, -1)
     def test_case_5(self):
         """``dropSearchIndex`` suppresses namespace not found errors."""
         # Create a driver-side collection object for a randomly generated collection name.  Do not create this collection on the server.
@@ -233,12 +233,12 @@ class TestSearchIndexProse(IntegrationTest):
         coll0.drop_search_index("foo")
 
 
-# globals().update(
-#     generate_test_classes(
-#         _TEST_PATH,
-#         module=__name__,
-#     )
-# )
+globals().update(
+    generate_test_classes(
+        _TEST_PATH,
+        module=__name__,
+    )
+)
 
 if __name__ == "__main__":
     unittest.main()
