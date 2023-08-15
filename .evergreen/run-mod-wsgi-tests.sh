@@ -12,7 +12,7 @@ else
         exit 1
     else
         # Stop the httpd service
-        sudo service httpd stop
+        sudo systemctl stop httpd.service
         APACHE_CONFIG=httpd_rhel8.conf
     fi
 fi
