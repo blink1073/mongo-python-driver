@@ -11,7 +11,7 @@ else
         echo "Could not find apache2 binary"
         exit 1
     else
-        APACHE_CONFIG=apache22amazon.conf
+        APACHE_CONFIG=http_rhel8.conf
     fi
 fi
 
