@@ -30,9 +30,10 @@ from typing import (
     TypeVar,
     Union,
     cast,
+    overload,
 )
 
-from bson.codec_options import DEFAULT_CODEC_OPTIONS
+from bson.codec_options import DEFAULT_CODEC_OPTIONS, CodecOptions
 from bson.dbref import DBRef
 from bson.son import SON
 from bson.timestamp import Timestamp
@@ -46,8 +47,12 @@ from pymongo.errors import CollectionInvalid, InvalidName, InvalidOperation
 from pymongo.read_preferences import ReadPreference, _ServerMode
 from pymongo.typings import _CollationIn, _DocumentType, _DocumentTypeArg, _Pipeline
 
+if TYPE_CHECKING:
+    from pymongo.pool import Connection
+    from pymongo.server import Server
 
-def _check_name(name):
+
+def _check_name(name: str) -> None:
     """Check if a database name is valid."""
     if not name:
         raise InvalidName("database name cannot be the empty string")
@@ -84,9 +89,8 @@ class Database(common.BaseObject, Generic[_DocumentType]):
         """Get a database by client and name.
 
         Raises :class:`TypeError` if `name` is not an instance of
-        :class:`basestring` (:class:`str` in python 3). Raises
-        :class:`~pymongo.errors.InvalidName` if `name` is not a valid
-        database name.
+        :class:`str`. Raises :class:`~pymongo.errors.InvalidName` if
+        `name` is not a valid database name.
 
         :Parameters:
           - `client`: A :class:`~pymongo.mongo_client.MongoClient` instance.
@@ -212,7 +216,7 @@ class Database(common.BaseObject, Generic[_DocumentType]):
     def __hash__(self) -> int:
         return hash((self.__client, self.__name))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Database({self.__client!r}, {self.__name!r})"
 
     def __getattr__(self, name: str) -> Collection[_DocumentType]:
@@ -295,7 +299,9 @@ class Database(common.BaseObject, Generic[_DocumentType]):
             read_concern,
         )
 
-    def _get_encrypted_fields(self, kwargs, coll_name, ask_db):
+    def _get_encrypted_fields(
+        self, kwargs: Mapping[str, Any], coll_name: str, ask_db: bool
+    ) -> Optional[Mapping[str, Any]]:
         encrypted_fields = kwargs.get("encryptedFields")
         if encrypted_fields:
             return deepcopy(encrypted_fields)
@@ -547,7 +553,7 @@ class Database(common.BaseObject, Generic[_DocumentType]):
                 user_fields={"cursor": {"firstBatch": 1}},
             )
             return self.client._retryable_read(
-                cmd.get_cursor, cmd.get_read_preference(s), s, retryable=not cmd._performs_write
+                cmd.get_cursor, cmd.get_read_preference(s), s, retryable=not cmd._performs_write  # type: ignore[arg-type]
             )
 
     def watch(
@@ -680,27 +686,63 @@ class Database(common.BaseObject, Generic[_DocumentType]):
             show_expanded_events=show_expanded_events,
         )
 
+    @overload
     def _command(
         self,
-        sock_info,
-        command,
-        value=1,
-        check=True,
-        allowable_errors=None,
-        read_preference=ReadPreference.PRIMARY,
-        codec_options=DEFAULT_CODEC_OPTIONS,
-        write_concern=None,
-        parse_write_concern_error=False,
-        session=None,
-        **kwargs,
-    ):
+        conn: Connection,
+        command: Union[str, MutableMapping[str, Any]],
+        value: int = 1,
+        check: bool = True,
+        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        read_preference: _ServerMode = ReadPreference.PRIMARY,
+        codec_options: CodecOptions[Dict[str, Any]] = DEFAULT_CODEC_OPTIONS,
+        write_concern: Optional[WriteConcern] = None,
+        parse_write_concern_error: bool = False,
+        session: Optional[ClientSession] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        ...
+
+    @overload
+    def _command(
+        self,
+        conn: Connection,
+        command: Union[str, MutableMapping[str, Any]],
+        value: int = 1,
+        check: bool = True,
+        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        read_preference: _ServerMode = ReadPreference.PRIMARY,
+        codec_options: CodecOptions[_CodecDocumentType] = ...,
+        write_concern: Optional[WriteConcern] = None,
+        parse_write_concern_error: bool = False,
+        session: Optional[ClientSession] = None,
+        **kwargs: Any,
+    ) -> _CodecDocumentType:
+        ...
+
+    def _command(
+        self,
+        conn: Connection,
+        command: Union[str, MutableMapping[str, Any]],
+        value: int = 1,
+        check: bool = True,
+        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        read_preference: _ServerMode = ReadPreference.PRIMARY,
+        codec_options: Union[
+            CodecOptions[Dict[str, Any]], CodecOptions[_CodecDocumentType]
+        ] = DEFAULT_CODEC_OPTIONS,
+        write_concern: Optional[WriteConcern] = None,
+        parse_write_concern_error: bool = False,
+        session: Optional[ClientSession] = None,
+        **kwargs: Any,
+    ) -> Union[Dict[str, Any], _CodecDocumentType]:
         """Internal command helper."""
         if isinstance(command, str):
             command = SON([(command, value)])
 
         command.update(kwargs)
         with self.__client._tmp_session(session) as s:
-            return sock_info.command(
+            return conn.command(
                 self.__name,
                 command,
                 read_preference,
@@ -712,6 +754,36 @@ class Database(common.BaseObject, Generic[_DocumentType]):
                 session=s,
                 client=self.__client,
             )
+
+    @overload
+    def command(
+        self,
+        command: Union[str, MutableMapping[str, Any]],
+        value: Any = 1,
+        check: bool = True,
+        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        read_preference: Optional[_ServerMode] = None,
+        codec_options: None = None,
+        session: Optional[ClientSession] = None,
+        comment: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        ...
+
+    @overload
+    def command(
+        self,
+        command: Union[str, MutableMapping[str, Any]],
+        value: Any = 1,
+        check: bool = True,
+        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        read_preference: Optional[_ServerMode] = None,
+        codec_options: CodecOptions[_CodecDocumentType] = ...,
+        session: Optional[ClientSession] = None,
+        comment: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> _CodecDocumentType:
+        ...
 
     @_csot.apply
     def command(
@@ -725,13 +797,13 @@ class Database(common.BaseObject, Generic[_DocumentType]):
         session: Optional[ClientSession] = None,
         comment: Optional[Any] = None,
         **kwargs: Any,
-    ) -> _CodecDocumentType:
+    ) -> Union[Dict[str, Any], _CodecDocumentType]:
         """Issue a MongoDB command.
 
         Send command `command` to the database and return the
-        response. If `command` is an instance of :class:`basestring`
-        (:class:`str` in python 3) then the command {`command`: `value`}
-        will be sent. Otherwise, `command` must be an instance of
+        response. If `command` is an instance of :class:`str`
+        then the command {`command`: `value`} will be sent.
+        Otherwise, `command` must be an instance of
         :class:`dict` and will be sent as is.
 
         Any additional keyword arguments will be added to the final
@@ -817,12 +889,12 @@ class Database(common.BaseObject, Generic[_DocumentType]):
 
         if read_preference is None:
             read_preference = (session and session._txn_read_preference()) or ReadPreference.PRIMARY
-        with self.__client._socket_for_reads(read_preference, session) as (
-            sock_info,
+        with self.__client._conn_for_reads(read_preference, session) as (
+            connection,
             read_preference,
         ):
             return self._command(
-                sock_info,
+                connection,
                 command,
                 value,
                 check,
@@ -838,14 +910,11 @@ class Database(common.BaseObject, Generic[_DocumentType]):
         self,
         command: Union[str, MutableMapping[str, Any]],
         value: Any = 1,
-        check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
         read_preference: Optional[_ServerMode] = None,
         codec_options: Optional[bson.codec_options.CodecOptions[_CodecDocumentType]] = None,
         session: Optional[ClientSession] = None,
         comment: Optional[Any] = None,
-        batch_size: Optional[int] = None,
-        max_time_ms: Optional[int] = None,
+        max_await_time_ms: Optional[int] = None,
         **kwargs: Any,
     ) -> CommandCursor:
         """Issue a MongoDB command and parse the response as a cursor.
@@ -866,10 +935,6 @@ class Database(common.BaseObject, Generic[_DocumentType]):
 
           - `value` (optional): value to use for the command verb when
             `command` is passed as a string
-          - `check` (optional): check the response for errors, raising
-            :class:`~pymongo.errors.OperationFailure` if there are any
-          - `allowable_errors`: if `check` is ``True``, error messages
-            in this list will be ignored by error-checking
           - `read_preference` (optional): The read preference for this
             operation. See :mod:`~pymongo.read_preferences` for options.
             If the provided `session` is in a transaction, defaults to the
@@ -880,11 +945,11 @@ class Database(common.BaseObject, Generic[_DocumentType]):
             instance.
           - `session` (optional): A
             :class:`~pymongo.client_session.ClientSession`.
-          - `comment` (optional): A user-provided comment to attach to this
+          - `comment` (optional): A user-provided comment to attach to future getMores for this
             command.
+          - `max_await_time_ms` (optional): The number of ms to wait for more data on future getMores for this command.
           - `**kwargs` (optional): additional keyword arguments will
             be added to the command document before it is sent
-
 
         .. note:: :meth:`command` does **not** obey this Database's
            :attr:`read_preference` or :attr:`codec_options`. You must use the
@@ -908,16 +973,16 @@ class Database(common.BaseObject, Generic[_DocumentType]):
                 read_preference = (
                     tmp_session and tmp_session._txn_read_preference()
                 ) or ReadPreference.PRIMARY
-            with self.__client._socket_for_reads(read_preference, tmp_session) as (
-                sock_info,
+            with self.__client._conn_for_reads(read_preference, tmp_session) as (
+                conn,
                 read_preference,
             ):
                 response = self._command(
-                    sock_info,
+                    conn,
                     command,
                     value,
-                    check,
-                    allowable_errors,
+                    True,
+                    None,
                     read_preference,
                     opts,
                     session=tmp_session,
@@ -928,66 +993,67 @@ class Database(common.BaseObject, Generic[_DocumentType]):
                     cmd_cursor = CommandCursor(
                         coll,
                         response["cursor"],
-                        sock_info.address,
-                        batch_size=batch_size or 0,
-                        max_await_time_ms=max_time_ms,
+                        conn.address,
+                        max_await_time_ms=max_await_time_ms,
                         session=tmp_session,
                         explicit_session=session is not None,
                         comment=comment,
                     )
-                    cmd_cursor._maybe_pin_connection(sock_info)
+                    cmd_cursor._maybe_pin_connection(conn)
                     return cmd_cursor
                 else:
                     raise InvalidOperation("Command does not return a cursor.")
 
     def _retryable_read_command(
         self,
-        command,
-        value=1,
-        check=True,
-        allowable_errors=None,
-        read_preference=None,
-        codec_options=DEFAULT_CODEC_OPTIONS,
-        session=None,
-        **kwargs,
-    ):
+        command: Union[str, MutableMapping[str, Any]],
+        session: Optional[ClientSession] = None,
+    ) -> Dict[str, Any]:
         """Same as command but used for retryable read commands."""
-        if read_preference is None:
-            read_preference = (session and session._txn_read_preference()) or ReadPreference.PRIMARY
+        read_preference = (session and session._txn_read_preference()) or ReadPreference.PRIMARY
 
-        def _cmd(session, server, sock_info, read_preference):
+        def _cmd(
+            session: Optional[ClientSession],
+            server: Server,
+            conn: Connection,
+            read_preference: _ServerMode,
+        ) -> Dict[str, Any]:
             return self._command(
-                sock_info,
+                conn,
                 command,
-                value,
-                check,
-                allowable_errors,
-                read_preference,
-                codec_options,
+                read_preference=read_preference,
                 session=session,
-                **kwargs,
             )
 
         return self.__client._retryable_read(_cmd, read_preference, session)
 
-    def _list_collections(self, sock_info, session, read_preference, **kwargs):
+    def _list_collections(
+        self,
+        conn: Connection,
+        session: Optional[ClientSession],
+        read_preference: _ServerMode,
+        **kwargs: Any,
+    ) -> CommandCursor[MutableMapping[str, Any]]:
         """Internal listCollections helper."""
-        coll = self.get_collection("$cmd", read_preference=read_preference)
+        coll = cast(
+            Collection[MutableMapping[str, Any]],
+            self.get_collection("$cmd", read_preference=read_preference),
+        )
         cmd = SON([("listCollections", 1), ("cursor", {})])
         cmd.update(kwargs)
         with self.__client._tmp_session(session, close=False) as tmp_session:
-            cursor = self._command(
-                sock_info, cmd, read_preference=read_preference, session=tmp_session
-            )["cursor"]
+            cursor = self._command(conn, cmd, read_preference=read_preference, session=tmp_session)[
+                "cursor"
+            ]
             cmd_cursor = CommandCursor(
                 coll,
                 cursor,
-                sock_info.address,
+                conn.address,
                 session=tmp_session,
                 explicit_session=session is not None,
                 comment=cmd.get("comment"),
             )
-        cmd_cursor._maybe_pin_connection(sock_info)
+        cmd_cursor._maybe_pin_connection(conn)
         return cmd_cursor
 
     def list_collections(
@@ -996,7 +1062,7 @@ class Database(common.BaseObject, Generic[_DocumentType]):
         filter: Optional[Mapping[str, Any]] = None,
         comment: Optional[Any] = None,
         **kwargs: Any,
-    ) -> CommandCursor[Dict[str, Any]]:
+    ) -> CommandCursor[MutableMapping[str, Any]]:
         """Get a cursor over the collections of this database.
 
         :Parameters:
@@ -1024,10 +1090,13 @@ class Database(common.BaseObject, Generic[_DocumentType]):
         if comment is not None:
             kwargs["comment"] = comment
 
-        def _cmd(session, server, sock_info, read_preference):
-            return self._list_collections(
-                sock_info, session, read_preference=read_preference, **kwargs
-            )
+        def _cmd(
+            session: Optional[ClientSession],
+            server: Server,
+            conn: Connection,
+            read_preference: _ServerMode,
+        ) -> CommandCursor[MutableMapping[str, Any]]:
+            return self._list_collections(conn, session, read_preference=read_preference, **kwargs)
 
         return self.__client._retryable_read(_cmd, read_pref, session)
 
@@ -1079,14 +1148,16 @@ class Database(common.BaseObject, Generic[_DocumentType]):
 
         return [result["name"] for result in self.list_collections(session=session, **kwargs)]
 
-    def _drop_helper(self, name, session=None, comment=None):
+    def _drop_helper(
+        self, name: str, session: Optional[ClientSession] = None, comment: Optional[Any] = None
+    ) -> Dict[str, Any]:
         command = SON([("drop", name)])
         if comment is not None:
             command["comment"] = comment
 
-        with self.__client._socket_for_writes(session) as sock_info:
+        with self.__client._conn_for_writes(session) as connection:
             return self._command(
-                sock_info,
+                connection,
                 command,
                 allowable_errors=["ns not found", 26],
                 write_concern=self._write_concern_for(session),
