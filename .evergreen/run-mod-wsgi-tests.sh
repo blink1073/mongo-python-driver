@@ -11,7 +11,8 @@ else
         echo "Could not find apache2 binary"
         exit 1
     else
-        # Stop the httpd service
+        # Start and stop the httpd service
+        sudo systemctl start httpd.service
         sudo systemctl stop httpd.service
         APACHE_CONFIG=httpd_rhel8.conf
     fi
