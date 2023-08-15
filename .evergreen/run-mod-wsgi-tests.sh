@@ -11,6 +11,8 @@ else
         echo "Could not find apache2 binary"
         exit 1
     else
+        # Start the httpd service
+        sudo service httpd start
         APACHE_CONFIG=httpd_rhel8.conf
     fi
 fi
