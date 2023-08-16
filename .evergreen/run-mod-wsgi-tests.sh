@@ -38,6 +38,8 @@ cd ..
 # Test the file before running it.
 $APACHE -t -f $CONFIG_PATH
 $APACHE -k start -v -f $CONFIG_PATH
+sleep 1
+cat access_log
 trap '$APACHE -k stop -f ${CONFIG_PATH}' EXIT HUP
 
 wget -t 1 -T 10 -O - "http://localhost:8080/interpreter1${PROJECT_DIRECTORY}" || (cat error_log && exit 1)
