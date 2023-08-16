@@ -33,12 +33,13 @@ if [ -n "$MOD_WSGI_EMBEDDED" ]; then
 else
     export MOD_WSGI_CONF=mod_wsgi_test.conf
 fi
+CONFIG_PATH="${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG}"
 
 cd ..
 # Test the file before running it.
-$APACHE -k -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG} -t
-$APACHE -k start -v -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG}
-trap '$APACHE -k stop -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG}' EXIT HUP
+$APACHE -t -f $CONFIG_PATH
+$APACHE -k start -v -f $CONFIG_PATH
+trap '$APACHE -k stop -f ${CONFIG_PATH}' EXIT HUP
 
 wget -t 1 -T 10 -O - "http://localhost:8080/interpreter1${PROJECT_DIRECTORY}" || (cat error_log && exit 1)
 wget -t 1 -T 10 -O - "http://localhost:8080/interpreter2${PROJECT_DIRECTORY}" || (cat error_log && exit 1)
