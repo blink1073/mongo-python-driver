@@ -35,7 +35,9 @@ else
 fi
 
 cd ..
-$APACHE -k start -v -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG} || true
+# Test the file before running it.
+$APACHE -k -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG} -t
+$APACHE -k start -v -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG}
 trap '$APACHE -k stop -f ${PROJECT_DIRECTORY}/test/mod_wsgi_test/${APACHE_CONFIG}' EXIT HUP
 
 wget -t 1 -T 10 -O - "http://localhost:8080/interpreter1${PROJECT_DIRECTORY}" || (cat error_log && exit 1)
