@@ -80,7 +80,6 @@ tls = []
 zstd = [
     "zstandard",
 ]
-test = ["pytest>=7"]
 
 [project.urls]
 Homepage = "https://www.mongodb.org"

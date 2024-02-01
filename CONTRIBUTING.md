@@ -195,7 +195,7 @@ the pages will re-render and the browser will automatically refresh.
 
 -   Ensure you have started the appropriate Mongo Server(s).
 -   Run `pip install tox` to use `tox` for testing or run
-    `pip install -e ".[test]"` to run `pytest` directly.
+    `pip install pytest"` to run `pytest` directly.
 -   Run `tox -m test` or `pytest` to run all of the tests.
 -   Append `test/<mod_name>.py::<class_name>::<test_name>` to run
     specific tests. You can omit the `<test_name>` to test a full class

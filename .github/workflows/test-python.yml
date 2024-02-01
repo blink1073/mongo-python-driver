@@ -160,5 +160,5 @@ jobs:
           shell: bash
           run: |
             cd sdist/test
-            pip install -e ".[test]"
-            pytest -v
+            pip install tox
+            tox -m test
