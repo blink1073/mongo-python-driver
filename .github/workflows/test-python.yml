@@ -160,6 +160,6 @@ jobs:
           shell: bash
           run: |
             cd sdist/test
-            pip install tox
+            pip install pytest
             pip install -e .
-            tox -m test
+            pytest
