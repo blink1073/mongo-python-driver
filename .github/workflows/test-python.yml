@@ -161,4 +161,5 @@ jobs:
           run: |
             cd sdist/test
             pip install tox
+            pip install -e .
             tox -m test
