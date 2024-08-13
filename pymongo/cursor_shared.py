@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence, Tuple, Union
 
+__all__ = ["_QUERY_OPTIONS", "_CURSOR_CLOSED_ERRORS", "CursorType", "_Sort", "_Hint"]
+
 # These errors mean that the server has already killed the cursor so there is
 # no need to send killCursors.
 _CURSOR_CLOSED_ERRORS = frozenset(
