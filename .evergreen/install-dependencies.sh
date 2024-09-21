@@ -26,6 +26,7 @@ mkdir -p ${BIN_DIR}
 if [ -n "${USE_RUST}" ]; then
   # TODO: fix this in drivers-tools:
   # Install once and export the variables.
+  # Make it quieter
   export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
   export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
   export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
@@ -36,12 +37,11 @@ fi
 # Install "just" using the installer, falling back to using cargo.
 # For platforms that do not have a compatible installer,
 # rust needs to have been installed (Setting the USE_RUST variable).
-ARGS="--to ${BIN_DIR}"
-curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS || {
-  # Install "just" using cargo
-  echo "Installing just..."
+CURL_ARGS="--retry 8 --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh"
+curl $CURL_ARGS | bash -s -- --to  "${BIN_DIR}" || {
+  echo "Installing just using cargo..."
   cargo install -q just
-  echo "Installing just... done."
+  echo "Installing just using cargo... done."
   ln -s "${CARGO_HOME}/bin/just" ${BIN_DIR}/just
 }
 
