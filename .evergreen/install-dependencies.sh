@@ -59,6 +59,8 @@ fi
 createvirtualenv "$PYTHON_BINARY" .venv
 trap "deactivate; rm -rf .venv" EXIT HUP
 python -m pip install -q hatch
+
+# Check hatch.
 hatch --version
 
 exit 1
