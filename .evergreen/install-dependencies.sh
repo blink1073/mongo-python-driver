@@ -25,10 +25,14 @@ if [ "${OS:-}" == "Windows_NT" ]; then
 fi
 curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS || {
     echo "'just' binary not available on this platform, installing using cargo..."
-    [ ! -d ${DRIVERS_TOOLS}/.cargo ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
-    ${DRIVERS_TOOLS}/.rustup/rustup default stable
-    ${DRIVERS_TOOLS}/.cargo/bin/cargo install just
-    mv ${DRIVERS_TOOLS}/.cargo/bin/just .bin
+    # TODO: we should be able to just call install-rust and have it no-op, and set these values.
+    export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
+    export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
+    export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
+    [ ! -d ${CARGO_HOME} ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
+    rustup default stable
+    cargo install just
+    mv ${CARGO_HOME}/bin/just .bin
 }
 
 if [ "${OS:-}" == "Windows_NT" ]; then
