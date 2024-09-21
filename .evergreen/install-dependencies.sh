@@ -22,6 +22,7 @@ BIN_DIR="${PROJECT_DIRECTORY}/.bin"
 mkdir -p
 
 # Install rust if need be.
+# shellcheck disable=SC2154
 if [ -n "${USE_RUST}" ]; then
   export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
   export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
@@ -52,5 +53,8 @@ fi
 # Check just.
 export PATH="${BIN_DIR}:${PATH}"
 ust --version
+
+# Install virtualenv and add hatch
+
 
 exit 1

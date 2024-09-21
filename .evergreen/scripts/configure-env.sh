@@ -28,6 +28,7 @@ fi
 
 export MONGO_ORCHESTRATION_HOME="$DRIVERS_TOOLS/.evergreen/orchestration"
 export MONGODB_BINARIES="$DRIVERS_TOOLS/mongodb/bin"
+BIN_DIR="${PROJECT_DIRECTORY}/.bin"
 
 cat <<EOT > $SCRIPT_DIR/env.sh
 set -o errexit
@@ -40,7 +41,7 @@ export MONGODB_BINARIES="$MONGODB_BINARIES"
 export PROJECT_DIRECTORY="$PROJECT_DIRECTORY"
 
 export TMPDIR="$MONGO_ORCHESTRATION_HOME/db"
-export PATH="$MONGODB_BINARIES:$PATH"
+export PATH="$BIN_DIR:$MONGODB_BINARIES:$PATH"
 # shellcheck disable=SC2154
 export PROJECT="$project"
 export PIP_QUIET=1
