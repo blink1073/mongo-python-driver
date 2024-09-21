@@ -18,8 +18,9 @@ echo "127.0.0.1 server" | $SUDO tee -a /etc/hosts
 echo "127.0.0.1 hostname_not_in_cert" | $SUDO tee -a /etc/hosts
 
 # Install just.
-mkdir -p ${PROJECT_DIRECTORY}/.bin
-ARGS="--to ${PROJECT_DIRECTORY}/.bin"
+BIN_DIR="${PROJECT_DIRECTORY}/.bin"
+mkdir -p
+ARGS="--to ${BIN_DIR}"
 if [ "${OS:-}" == "Windows_NT" ]; then
   ARGS="$ARGS --target x86_64-pc-windows-msvc"
 fi
@@ -31,13 +32,15 @@ curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -
     export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
     [ ! -d ${CARGO_HOME} ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
     rustup default stable
-    cargo install just
-    mv ${CARGO_HOME}/bin/just .bin
+    echo "Installing just..."
+    cargo install -q just
+    echo "Installing just... done."
+    if [ "${OS:-}" == "Windows_NT" ]; then
+      ln -s "${CARGO_HOME}/bin/just.exe" "${BIN_DIR}/just"
+    else
+      ln -s "${CARGO_HOME}/bin/just" "${BIN_DIR}/just"
+    fi
 }
 
-if [ "${OS:-}" == "Windows_NT" ]; then
-  chmod +x .bin/just.exe
-  .bin/just.exe --version
-else
-  .bin/just --version
-fi
+${BIN_DIR}/just --version
+exit 1
