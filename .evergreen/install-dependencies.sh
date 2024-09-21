@@ -24,6 +24,8 @@ mkdir -p ${BIN_DIR}
 # Install rust if need be.
 # shellcheck disable=SC2154
 if [ -n "${USE_RUST}" ]; then
+  # TODO: fix this in drivers-tools:
+  # Install once and export the variables.
   export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
   export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
   export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
@@ -32,10 +34,9 @@ if [ -n "${USE_RUST}" ]; then
 fi
 
 # Install "just" using the installer, falling back to using cargo.
+# For platforms that do not have a compatible installer,
+# rust needs to have been installed (Setting the USE_RUST variable).
 ARGS="--to ${BIN_DIR}"
-if [ "${OS:-}" == "Windows_NT" ]; then
-  ARGS="$ARGS --target x86_64-pc-windows-msvc"
-fi
 curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS || {
   # Install "just" using cargo
   echo "Installing just..."
@@ -43,20 +44,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -
   echo "Installing just... done."
   ln -s "${CARGO_HOME}/bin/just" just
 }
-
-# Make "just" executable.
-if [ "${OS:-}" == "Windows_NT" ]; then
-  chmod+x just.exe
-  mv just.exe ${BIN_DIR}
-  ln -s "${BIN_DIR}/just.exe" "${BIN_DIR}/just"
-else
-  mv just ${BIN_DIR}
-fi
+mv just ${BIN_DIR}
 
 # Check just.
 just --version
 
-# Install virtualenv and add hatch
+# Install virtualenv and add hatch.  For platforms that do not have a cryptography wheel,
+# rust needs to have been installed (Setting the USE_RUST variable).
 . .evergreen/utils.sh
 
 if [ -z "${PYTHON_BINARY:-}" ]; then
