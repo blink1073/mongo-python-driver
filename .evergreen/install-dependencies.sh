@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-source env.sh
+source .evergreen/scripts/env.sh
 # Copy PyMongo's test certificates over driver-evergreen-tools'
 # cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
 
