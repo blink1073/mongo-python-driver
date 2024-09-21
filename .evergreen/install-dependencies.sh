@@ -22,6 +22,7 @@ mkdir -p ${PROJECT_DIRECTORY}/.bin
 curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ${PROJECT_DIRECTORY}/.bin || {
     echo "Not available on this platform!"
 }
+.bin/just --version
 exit 1
 
 [ ! -d ${DRIVERS_TOOLS}/.cargo ] && bash ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
