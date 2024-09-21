@@ -1,6 +1,5 @@
 #!/bin/bash
-set -o xtrace   # Write all commands first to stderr
-set -o errexit  # Exit the script with error if any of the commands fail
+set -eu
 
 # Copy PyMongo's test certificates over driver-evergreen-tools'
 cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
@@ -17,3 +16,12 @@ fi
 # Add 'server' and 'hostname_not_in_cert' as a hostnames
 echo "127.0.0.1 server" | $SUDO tee -a /etc/hosts
 echo "127.0.0.1 hostname_not_in_cert" | $SUDO tee -a /etc/hosts
+
+# Install just.
+mkdir -p ${PROJECT_DIRECTORY}/.bin
+curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ${PROJECT_DIRECTORY}/.bin || {
+    echo "Not available on this platform!"
+}
+exit 1
+
+[ ! -d ${DRIVERS_TOOLS}/.cargo ] && bash ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
