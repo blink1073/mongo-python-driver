@@ -42,9 +42,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -
   echo "Installing just..."
   cargo install -q just
   echo "Installing just... done."
-  ln -s "${CARGO_HOME}/bin/just" just
+  ln -s "${CARGO_HOME}/bin/just" ${BIN_DIR}/just
 }
-mv just ${BIN_DIR}
 
 # Check just.
 just --version
