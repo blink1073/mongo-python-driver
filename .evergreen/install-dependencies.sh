@@ -56,7 +56,6 @@ if [ -z "${PYTHON_BINARY:-}" ]; then
     PYTHON_BINARY=$(find_python3)
 fi
 createvirtualenv "$PYTHON_BINARY" .venv
-trap "deactivate; rm -rf .venv" EXIT HUP
 python -m pip install -q hatch
 
 # Check hatch.
