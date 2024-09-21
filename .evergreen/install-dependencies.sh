@@ -26,7 +26,7 @@ fi
 curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS || {
     echo "'just' binary not available on this platform, installing using cargo..."
     [ ! -d ${DRIVERS_TOOLS}/.cargo ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
-    ${DRIVERS_TOOLS}/.rustup/bin/rustup default stable
+    ${DRIVERS_TOOLS}/.rustup/rustup default stable
     ${DRIVERS_TOOLS}/.cargo/bin/cargo install just
     mv ${DRIVERS_TOOLS}/.cargo/bin/just .bin
 }
