@@ -2,10 +2,10 @@
 set -eu
 
 # Copy PyMongo's test certificates over driver-evergreen-tools'
-cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
+# cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
 
-# Replace MongoOrchestration's client certificate.
-cp ${PROJECT_DIRECTORY}/test/certificates/client.pem ${MONGO_ORCHESTRATION_HOME}/lib/client.pem
+# # Replace MongoOrchestration's client certificate.
+# cp ${PROJECT_DIRECTORY}/test/certificates/client.pem ${MONGO_ORCHESTRATION_HOME}/lib/client.pem
 
 if [ -w /etc/hosts ]; then
   SUDO=""
@@ -55,6 +55,14 @@ export PATH="${BIN_DIR}:${PATH}"
 ust --version
 
 # Install virtualenv and add hatch
+. .evergreen/utils.sh
 
+if [ -z "${PYTHON_BINARY:-}" ]; then
+    PYTHON_BINARY=$(find_python3)
+fi
+createvirtualenv "$PYTHON_BINARY" .venv
+trap "deactivate; rm -rf .venv" EXIT HUP
+python -m pip install -q hatch
+hatch --version
 
 exit 1

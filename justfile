@@ -31,11 +31,11 @@ typing-mypy:
 
 [group('lint')]
 lint:
-    hatch run lint:run
+    pre-commit run --all-files
 
 [group('lint')]
 lint-manual:
-    hatch run lint:run-manual
+    pre-commit run --all-files --hook-stage manual
 
 [group('test')]
 test:
