@@ -19,10 +19,20 @@ echo "127.0.0.1 hostname_not_in_cert" | $SUDO tee -a /etc/hosts
 
 # Install just.
 mkdir -p ${PROJECT_DIRECTORY}/.bin
-curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ${PROJECT_DIRECTORY}/.bin || {
-    echo "Not available on this platform!"
+ARGS="--to ${PROJECT_DIRECTORY}/.bin"
+if [ "${OS:-}" == "Windows_NT" ]; then
+  ARGS="$ARGS --target x86_64-pc-windows-msvc"
+fi
+curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS || {
+    echo "'just' binary not available on this platform, installing using cargo..."
+    [ ! -d ${DRIVERS_TOOLS}/.cargo ] && bash ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
+    ${DRIVERS_TOOLS}/.cargo/bin/cargo install just
+    mv ${DRIVERS_TOOLS}/.cargo/bin/just .bin
 }
-.bin/just --version
-exit 1
 
-[ ! -d ${DRIVERS_TOOLS}/.cargo ] && bash ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
+if [ "${OS:-}" == "Windows_NT" ]; then
+  chmod +x .bin/just.exe
+  .bin/just.exe --version
+else
+  .bin/just --version
+fi
