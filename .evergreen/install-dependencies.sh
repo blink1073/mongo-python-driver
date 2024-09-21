@@ -17,30 +17,40 @@ fi
 echo "127.0.0.1 server" | $SUDO tee -a /etc/hosts
 echo "127.0.0.1 hostname_not_in_cert" | $SUDO tee -a /etc/hosts
 
-# Install just.
+# Install binaries.
 BIN_DIR="${PROJECT_DIRECTORY}/.bin"
 mkdir -p
-ARGS="--to ${BIN_DIR}"
-if [ "${OS:-}" == "Windows_NT" ]; then
-  ARGS="$ARGS --target x86_64-pc-windows-msvc"
-fi
-curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS || {
-    echo "'just' binary not available on this platform, installing using cargo..."
-    # TODO: we should be able to just call install-rust and have it no-op, and set these values.
-    export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
-    export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
-    export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
-    [ ! -d ${CARGO_HOME} ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
-    rustup default stable
-    echo "Installing just..."
-    cargo install -q just
-    echo "Installing just... done."
-    if [ "${OS:-}" == "Windows_NT" ]; then
-      ln -s "${CARGO_HOME}/bin/just.exe" "${BIN_DIR}/just"
-    else
-      ln -s "${CARGO_HOME}/bin/just" "${BIN_DIR}/just"
-    fi
-}
 
-${BIN_DIR}/just --version
+# Install rust if need be.
+if [ -n "${USE_RUST}" ]; then
+  export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
+  export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
+  export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
+  [ ! -d ${CARGO_HOME} ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
+  rustup default stable
+
+  # Install "just" using cargo
+  echo "Installing just..."
+  cargo install -q just
+  echo "Installing just... done."
+  ln -s "${CARGO_HOME}/bin/just" "${BIN_DIR}/just"
+else
+  # Install "just" using the installer.
+  ARGS="--to ${BIN_DIR}"
+  if [ "${OS:-}" == "Windows_NT" ]; then
+    ARGS="$ARGS --target x86_64-pc-windows-msvc"
+  fi
+  curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- $ARGS
+  if [ "${OS:-}" == "Windows_NT" ]; then
+    mv just.exe ${BIN_DIR}
+    ln -s "${BIN_DIR}/just.exe" "${BIN_DIR}/just"
+  else
+    mv just ${BIN_DIR}
+  fi
+fi
+
+# Check just.
+export PATH="${BIN_DIR}:${PATH}"
+ust --version
+
 exit 1
