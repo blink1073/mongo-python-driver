@@ -5,6 +5,8 @@ set -eu
 
 echo "Running MONGODB-OIDC authentication tests"
 
+. ./.evergreen/scripts/env.sh
+
 OIDC_ENV=${OIDC_ENV:-"test"}
 
 if [ $OIDC_ENV == "test" ]; then
@@ -29,4 +31,4 @@ fi
 export TEST_AUTH_OIDC=1
 export COVERAGE=1
 export AUTH="auth"
-bash ./.evergreen/hatch.sh test:test-eg -- "${@:1}"
+just test-eg -- "${@:1}"

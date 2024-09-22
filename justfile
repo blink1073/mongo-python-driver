@@ -42,6 +42,10 @@ test:
     hatch run test:test
 
 [group('test')]
+test-mockupdb:
+    hatch run test:test-mockupdb
+
+[group('test')]
 test-eg:
     hatch run test:test-eg
 

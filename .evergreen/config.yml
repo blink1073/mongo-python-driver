@@ -331,7 +331,7 @@ functions:
           . .evergreen/scripts/env.sh
           set -o xtrace
           export PYTHON_BINARY=${PYTHON_BINARY}
-          hatch run test:test-mockupdb
+          just test-mockupdb
 
   "run doctests":
      - command: shell.exec
@@ -340,8 +340,7 @@ functions:
          working_dir: "src"
          script: |
            . .evergreen/scripts/env.sh
-           set -o xtrace
-           PYTHON_BINARY=${PYTHON_BINARY} bash ${PROJECT_DIRECTORY}/.evergreen/hatch.sh doctest:test
+           just doct-test
 
   "run tests":
     - command: shell.exec
@@ -413,7 +412,7 @@ functions:
             SSL=${SSL} \
             TEST_DATA_LAKE=${TEST_DATA_LAKE} \
             MONGODB_API_VERSION=${MONGODB_API_VERSION} \
-            bash ${PROJECT_DIRECTORY}/.evergreen/hatch.sh test:test-eg
+            just test-eg
 
   "run enterprise auth tests":
     - command: shell.exec
@@ -424,12 +423,13 @@ functions:
         script: |
           # Disable xtrace for security reasons (just in case it was accidentally set).
           set +x
+          . .evergreen/scripts/env.sh
           bash ${DRIVERS_TOOLS}/.evergreen/auth_aws/setup_secrets.sh drivers/enterprise_auth
           PROJECT_DIRECTORY="${PROJECT_DIRECTORY}" \
             PYTHON_BINARY="${PYTHON_BINARY}" \
             TEST_ENTERPRISE_AUTH=1 \
             AUTH=auth \
-            bash ${PROJECT_DIRECTORY}/.evergreen/hatch.sh test:test-eg
+            just test-eg
 
   "run atlas tests":
     - command: shell.exec
@@ -441,11 +441,12 @@ functions:
           # Disable xtrace for security reasons (just in case it was accidentally set).
           set +x
           set -o errexit
+          . .evergreen/scripts/env.sh
           bash ${DRIVERS_TOOLS}/.evergreen/auth_aws/setup_secrets.sh drivers/atlas_connect
           PROJECT_DIRECTORY="${PROJECT_DIRECTORY}" \
             PYTHON_BINARY="${PYTHON_BINARY}" \
             TEST_ATLAS=1 \
-            bash ${PROJECT_DIRECTORY}/.evergreen/hatch.sh test:test-eg
+            just test-eg
 
   "get aws auth secrets":
     - command: subprocess.exec
@@ -565,7 +566,7 @@ functions:
         script: |
           . .evergreen/scripts/env.sh
           if [ -f $DRIVERS_TOOLS/.evergreen/csfle/secrets-export.sh ]; then
-            . .evergreen/hatch.sh encryption:teardown
+            just teardown-encryption
           fi
           rm -rf ${DRIVERS_TOOLS} || true
           rm -f ./secrets-export.sh || true
@@ -619,6 +620,7 @@ functions:
           . .evergreen/scripts/env.sh
           set -o xtrace
           export USE_RUST=${USE_RUST}
+          export PYTHON_BINARY=${PYTHON_BINARY}
           file="${PROJECT_DIRECTORY}/.evergreen/install-dependencies.sh"
           # Don't use ${file} syntax here because evergreen treats it as an empty expansion.
           [ -f "$file" ] && bash $file #|| echo "$file not available, skipping"
@@ -653,7 +655,7 @@ functions:
           PYTHON_BINARY=${PYTHON_BINARY} \
           CA_FILE="${DRIVERS_TOOLS}/.evergreen/ocsp/${OCSP_ALGORITHM}/ca.pem" \
           OCSP_TLS_SHOULD_SUCCEED="${OCSP_TLS_SHOULD_SUCCEED}" \
-          bash ${PROJECT_DIRECTORY}/.evergreen/hatch.sh test:test-eg
+          just test-eg
 
   run-valid-ocsp-server:
     - command: shell.exec
@@ -1946,8 +1948,8 @@ tasks:
               . .evergreen/scripts/env.sh
               export PYTHON_BINARY=/opt/mongodbtoolchain/v4/bin/python3
               export LIBMONGOCRYPT_URL=https://s3.amazonaws.com/mciuploads/libmongocrypt/debian11/master/latest/libmongocrypt.tar.gz
-              SKIP_SERVERS=1 bash ./.evergreen/setup-encryption.sh
-              SUCCESS=false TEST_FLE_GCP_AUTO=1 ./.evergreen/hatch.sh test:test-eg
+              SKIP_SERVERS=1 just setup-encryption
+              SUCCESS=false TEST_FLE_GCP_AUTO=1 just test-eg
 
     - name: testazurekms-task
       commands:

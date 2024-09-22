@@ -3,6 +3,8 @@
 set -o xtrace
 set -o errexit
 
+. ./.evergreen/scripts/env.sh
+
 git clone --depth 1 https://github.com/mongodb/specifications.git
 pushd specifications/source/benchmarking/data
 tar xf extended_bson.tgz
@@ -16,4 +18,4 @@ export OUTPUT_FILE="${PROJECT_DIRECTORY}/results.json"
 export PYTHON_BINARY=/opt/mongodbtoolchain/v4/bin/python3
 export PERF_TEST=1
 
-bash ./.evergreen/hatch.sh test:test-eg
+just test-eg

@@ -15,6 +15,8 @@ set -o errexit  # Exit the script with error if any of the commands fail
 
 echo "Running MONGODB-AWS authentication tests"
 
+. .evergreen/scripts/env.sh
+
 # Handle credentials and environment setup.
 . $DRIVERS_TOOLS/.evergreen/auth_aws/aws_setup.sh $1
 
@@ -24,4 +26,4 @@ set -x
 export TEST_AUTH_AWS=1
 export AUTH="auth"
 export SET_XTRACE_ON=1
-bash ./.evergreen/hatch.sh test:test-eg
+just test-eg
