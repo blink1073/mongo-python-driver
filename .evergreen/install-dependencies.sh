@@ -67,5 +67,3 @@ python --version
 
 # Check hatch.
 hatch --version
-
-exit 1

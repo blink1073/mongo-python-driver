@@ -5,8 +5,6 @@ set -eu
 
 echo "Running MONGODB-OIDC authentication tests"
 
-. ./.evergreen/scripts/env.sh
-
 OIDC_ENV=${OIDC_ENV:-"test"}
 
 if [ $OIDC_ENV == "test" ]; then

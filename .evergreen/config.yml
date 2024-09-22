@@ -618,7 +618,6 @@ functions:
         working_dir: "src"
         script: |
           . .evergreen/scripts/env.sh
-          set -o xtrace
           export USE_RUST=${USE_RUST}
           export PYTHON_BINARY=${PYTHON_BINARY}
           file="${PROJECT_DIRECTORY}/.evergreen/install-dependencies.sh"
