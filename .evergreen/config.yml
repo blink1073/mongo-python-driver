@@ -2131,8 +2131,6 @@ axes:
           venv_bin_dir: "Scripts"
           # CSOT tests are unreliable on our slow Windows hosts.
           SKIP_CSOT_TESTS: true
-          # just installer does not work on windows
-          USE_RUST: true
 
   # Test with authentication?
   - id: auth
