@@ -38,7 +38,7 @@ fi
 # For platforms that do not have a compatible installer,
 # rust needs to have been installed (Setting the USE_RUST variable).
 CURL_ARGS="--retry 8 --tlsv1.2 -sSf https://just.systems/install.sh"
-JUST_ARGS="--to  "${BIN_DIR}""
+JUST_ARGS="--to ${BIN_DIR}"
 if [ "${OS:-}" == "Windows_NT" ]; then
   JUST_ARGS="$JUST_ARGS --target x86_64-pc-windows-msvc"
 fi
