@@ -16,6 +16,7 @@ if ! command -v just > /dev/null; then
   fi
   curl --proto '=https' $CURL_ARGS | bash -s -- ${JUST_ARGS} || {
     # Install rust and install with cargo.
+    export RUSTUP_HOME="${CARGO_HOME}/.rustup"
     ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
     source "${CARGO_HOME}/env"
     cargo install -q just
@@ -40,6 +41,7 @@ if ! command -v hatch > /dev/null; then
   python -m pip install -U pip
   python -m pip install hatch || {
     # Install rust and try again.
+    export RUSTUP_HOME="${CARGO_HOME}/.rustup"
     ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
     source "${CARGO_HOME}/env"
     python -m pip install hatch

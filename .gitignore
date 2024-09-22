@@ -9,20 +9,13 @@ build/
 doc/_build/
 dist/
 tools/settings.py
-drivers-evergreen-tools
 pymongo.egg-info/
 *.so
 *.egg*
-.tox
-mongocryptd.pid
 .idea/
 .vscode/
 .nova/
-venv/
-secrets-export.sh
-libmongocrypt.tar.gz
-libmongocrypt/
-libmongocrypt_git/
+.venv
 
 # Lambda temp files
 test/lambda/.aws-sam
@@ -31,8 +24,14 @@ test/lambda/mongodb/pymongo/*
 test/lambda/mongodb/gridfs/*
 test/lambda/mongodb/bson/*
 
-# test results and logs
+# test files.
 xunit-results/
+secrets-export.sh
 server.log
 expansion.yml
 test-results.json
+.evergreen/scripts/env.sh
+mongocryptd.pid
+libmongocrypt.tar.gz
+libmongocrypt/
+libmongocrypt_git/
