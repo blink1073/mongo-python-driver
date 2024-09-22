@@ -37,13 +37,21 @@ fi
 # Install "just" using the installer, falling back to using cargo.
 # For platforms that do not have a compatible installer,
 # rust needs to have been installed (Setting the USE_RUST variable).
-CURL_ARGS="--retry 8 --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh"
-curl $CURL_ARGS | bash -s -- --to  "${BIN_DIR}" || {
+CURL_ARGS="--retry 8 --tlsv1.2 -sSf https://just.systems/install.sh"
+JUST_ARGS="--to  "${BIN_DIR}""
+if [ "${OS:-}" == "Windows_NT" ]; then
+  JUST_ARGS="$JUST_ARGS --target x86_64-pc-windows-msvc"
+fi
+curl --proto '=https' $CURL_ARGS | bash -s -- "${JUST_ARGS}" || {
   echo "Installing just using cargo..."
   cargo install -q just
   echo "Installing just using cargo... done."
   ln -s "${CARGO_HOME}/bin/just" ${BIN_DIR}/just
 }
+# Make an alias without the .exe extension.
+if [ "${OS:-}" == "Windows_NT" ]; then
+  ln -s "${BIN_DIR}/just.exe" "${BIN_DIR}/just"
+fi
 
 # Check just.
 just --version
