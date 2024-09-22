@@ -25,14 +25,9 @@ mkdir -p ${BIN_DIR}
 # Install rust if need be.
 # shellcheck disable=SC2154
 if [ -n "${USE_RUST:-}" ]; then
-  # TODO: fix this in drivers-tools:
-  # Install once and export the variables.
-  # Make it quieter
-  export RUSTUP_HOME="${RUSTUP_HOME:-"${DRIVERS_TOOLS}/.rustup"}"
-  export CARGO_HOME="${CARGO_HOME:-"${DRIVERS_TOOLS}/.cargo"}"
-  export PATH="${RUSTUP_HOME}/bin:${CARGO_HOME}/bin:$PATH"
-  [ ! -d ${CARGO_HOME} ] && ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
-  rustup default stable
+  ${DRIVERS_TOOLS}/.evergreen/install-rust.sh
+  CARGO_HOME=${DRIVERS_TOOLS}/.cargo
+  source "${CARGO_HOME}/env"
 fi
 
 # Install "just" using the installer, falling back to using cargo.
