@@ -11,14 +11,14 @@ fi
 
 PROJECT_DIRECTORY="$(pwd)"
 DRIVERS_TOOLS="$(dirname $PROJECT_DIRECTORY)/drivers-tools"
-PYTHON_BIN="$(PROJECT_DIRECTORY)/.venv/bin"
+PYTHON_BIN="${PROJECT_DIRECTORY}/.venv/bin"
 BIN_DIR="${PROJECT_DIRECTORY}/.bin"
 
 # Python has cygwin path problems on Windows. Detect prospective mongo-orchestration home directory
 if [ "Windows_NT" = "$OS" ]; then # Magic variable in cygwin
     DRIVERS_TOOLS=$(cygpath -m $DRIVERS_TOOLS)
     PROJECT_DIRECTORY=$(cygpath -m $PROJECT_DIRECTORY)
-    PYTHON_BIN=$(cygpath -m $PYTHON_BIN)
+    PYTHON_BIN=$(cygpath -m "${PROJECT_DIRECTORY}/.venv/Scripts")
     BIN_DIR=$(cygpath -m $BIN_DIR)
 fi
 
