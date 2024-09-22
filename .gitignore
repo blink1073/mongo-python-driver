@@ -34,3 +34,5 @@ test/lambda/mongodb/bson/*
 # test results and logs
 xunit-results/
 server.log
+expansion.yml
+test-results.json

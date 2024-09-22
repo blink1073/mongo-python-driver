@@ -40,11 +40,11 @@ functions:
     # Make an evergreen expansion file with dynamic values
     - command: subprocess.exec
       params:
-        include_expansions_in_env: ["is_patch", "project", "version_id"]
+        include_expansions_in_env: ["is_patch", "project", "version_id", "PYTHON_BINARY"]
         binary: bash
         working_dir: "src"
         args:
-          - .evergreen/scripts/configure-env.sh
+          - .evergreen/setup-system.sh
     # Load the expansion file to make an evergreen variable with the current unique version
     - command: expansions.update
       params:

@@ -1,10 +1,11 @@
-#!/bin/bash -ex
+#!/bin/bash
+set -eu
 
 # Get the current unique version of this checkout
 # shellcheck disable=SC2154
-if [ "$is_patch" = "true" ]; then
+if [ "${is_patch:-}" = "true" ]; then
     # shellcheck disable=SC2154
-    CURRENT_VERSION="$(git describe)-patch-$version_id"
+    CURRENT_VERSION="$(git describe)-patch-${version_id:-unknown}"
 else
     CURRENT_VERSION=latest
 fi
