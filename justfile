@@ -1,5 +1,7 @@
 # See https://just.systems/man/en/ for instructions
 
+set dotenv-filename := "./.evergreen/scripts/env.sh"
+
 # Make the default recipe private so it doesn't show up in the list.
 [private]
 default:
