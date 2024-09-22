@@ -48,10 +48,7 @@ curl --proto '=https' $CURL_ARGS | bash -s -- ${JUST_ARGS} || {
   echo "Installing just using cargo... done."
   ln -s "${CARGO_HOME}/bin/just" ${BIN_DIR}/just
 }
-# Make an alias without the .exe extension.
-if [ "${OS:-}" == "Windows_NT" ]; then
-  ln -s "${BIN_DIR}/just.exe" "${BIN_DIR}/just"
-fi
+
 
 # Check just.
 just --version
