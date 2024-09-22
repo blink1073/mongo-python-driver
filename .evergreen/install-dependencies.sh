@@ -2,11 +2,12 @@
 set -eu
 
 source .evergreen/scripts/env.sh
-# Copy PyMongo's test certificates over driver-evergreen-tools'
-# cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
 
-# # Replace MongoOrchestration's client certificate.
-# cp ${PROJECT_DIRECTORY}/test/certificates/client.pem ${MONGO_ORCHESTRATION_HOME}/lib/client.pem
+# Copy PyMongo's test certificates over driver-evergreen-tools'
+cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
+
+# Replace MongoOrchestration's client certificate.
+cp ${PROJECT_DIRECTORY}/test/certificates/client.pem ${MONGO_ORCHESTRATION_HOME}/lib/client.pem
 
 if [ -w /etc/hosts ]; then
   SUDO=""

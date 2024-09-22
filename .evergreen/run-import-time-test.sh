@@ -1,11 +1,9 @@
-#!/bin/bash -ex
-
-set -o errexit  # Exit the script with error if any of the commands fail
-set -x
+#!/bin/bash
+set -eu
 
 . .evergreen/utils.sh
 
-if [ -z "$PYTHON_BINARY" ]; then
+if [ -z "${PYTHON_BINARY:-}" ]; then
     PYTHON_BINARY=$(find_python3)
 fi
 

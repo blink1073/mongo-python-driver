@@ -30,5 +30,7 @@ export TEST_AUTH_AWS=1
 export AUTH="auth"
 export SET_XTRACE_ON=1
 cd src
-$PYTHON_BINARY -m pip install -q --user hatch
+$PYTHON_BINARY -m venv .venv
+source .venv/bin/activate
+pip install -q hatch
 hatch run test:test-eg

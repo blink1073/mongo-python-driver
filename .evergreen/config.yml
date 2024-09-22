@@ -340,7 +340,7 @@ functions:
          working_dir: "src"
          script: |
            . .evergreen/scripts/env.sh
-           just doct-test
+           just docs-test
 
   "run tests":
     - command: shell.exec
@@ -805,6 +805,7 @@ task_groups:
     setup_group:
       - func: "fetch source"
       - func: "prepare resources"
+      - func: "install dependencies"
       - command: subprocess.exec
         params:
           binary: bash
@@ -830,6 +831,7 @@ task_groups:
       - func: prepare resources
       - func: fix absolute paths
       - func: make files executable
+      - func: "install dependencies"
       - command: subprocess.exec
         params:
           binary: "bash"
@@ -851,6 +853,7 @@ task_groups:
       - func: prepare resources
       - func: fix absolute paths
       - func: make files executable
+      - func: "install dependencies"
       - command: subprocess.exec
         params:
           binary: bash
@@ -877,6 +880,7 @@ task_groups:
       - func: prepare resources
       - func: fix absolute paths
       - func: make files executable
+      - func: "install dependencies"
       - command: subprocess.exec
         params:
           binary: bash
@@ -901,6 +905,7 @@ task_groups:
       - func: prepare resources
       - func: fix absolute paths
       - func: make files executable
+      - func: "install dependencies"
       - command: subprocess.exec
         params:
           binary: bash
@@ -925,6 +930,7 @@ task_groups:
       - func: prepare resources
       - func: fix absolute paths
       - func: make files executable
+      - func: "install dependencies"
       - func: "assume ec2 role"
       - command: subprocess.exec
         params:
@@ -951,6 +957,7 @@ task_groups:
       - func: fetch source
       - func: prepare resources
       - func: setup atlas
+      - func: "install dependencies"
     teardown_task:
       - func: teardown atlas
     setup_group_can_fail_task: true
@@ -965,6 +972,7 @@ task_groups:
       - func: fix absolute paths
       - func: make files executable
       - func: setup atlas
+      - func: "install dependencies"
     teardown_task:
       - func: teardown atlas
     setup_group_can_fail_task: true
