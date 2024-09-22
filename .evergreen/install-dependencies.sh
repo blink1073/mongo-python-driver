@@ -49,7 +49,6 @@ curl --proto '=https' $CURL_ARGS | bash -s -- ${JUST_ARGS} || {
   ln -s "${CARGO_HOME}/bin/just" ${BIN_DIR}/just
 }
 
-
 # Check just.
 just --version
 
@@ -62,6 +61,9 @@ if [ -z "${PYTHON_BINARY:-}" ]; then
 fi
 createvirtualenv "$PYTHON_BINARY" .venv
 python -m pip install -q hatch
+
+# Check python
+python --version
 
 # Check hatch.
 hatch --version
