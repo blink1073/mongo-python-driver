@@ -30,7 +30,7 @@ PATH="${PYTHON_BIN}:${CARGO_HOME}/bin:${MONGODB_BINARIES}:${PATH}"
 
 # Ensure a checkout of drivers-tools.
 if [ ! -d "$DRIVERS_TOOLS" ]; then
-  git clone https://github.com/mongodb-labs/drivers-evergreen-tools $DRIVERS_TOOLS
+  git clone --branch rust-robust https://github.com/blink1073/drivers-evergreen-tools $DRIVERS_TOOLS
 fi
 
 # Get the current unique version of this checkout
@@ -69,6 +69,13 @@ MONGODB_BINARIES="$MONGODB_BINARIES"
 TMPDIR="$MONGO_ORCHESTRATION_HOME/db"
 EOT
 
+# Use our own certificates for csfle.
+cat <<EOT > ${DRIVERS_TOOLS}/.evergreen/csfle/.env
+CSFLE_TLS_CA_FILE="${PROJECT_DIRECTORY}/test/certificates/ca-ec.pem"
+CSFLE_TLS_CERT_FILE="${PROJECT_DIRECTORY}/test/certificates/server-ec.pem"
+CSFLE_TLS_CLIENT_CERT_FILE="${PROJECT_DIRECTORY}/test/certificates/client.pem"
+EOT
+
 # Set up drivers-tools.  This will call install-dependencies.sh.
 bash ${DRIVERS_TOOLS}/.evergreen/setup.sh
 
@@ -80,10 +87,6 @@ cat /etc/hosts | grep hostname_not_in_cert > /dev/null || {
   echo "127.0.0.1 hostname_not_in_cert" | $SUDO tee -a /etc/hosts
   echo "Adding localhost aliases... done."
 }
-
-# Override drivers-tools certificates with our own.
-cp ${PROJECT_DIRECTORY}/test/certificates/* ${DRIVERS_TOOLS}/.evergreen/x509gen/
-cp ${PROJECT_DIRECTORY}/test/certificates/client.pem ${MONGO_ORCHESTRATION_HOME}/lib/client.pem
 
 # Add these expansions to make it easier to call out tests scripts from the EVG yaml.
 cat <<EOT > expansion.yml
