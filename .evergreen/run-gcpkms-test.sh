@@ -18,6 +18,6 @@ echo "Untarring file ... begin"
 GCPKMS_CMD="tar xf mongo-python-driver.tgz" $DRIVERS_TOOLS/.evergreen/csfle/gcpkms/run-command.sh
 echo "Untarring file ... end"
 echo "Running test ... begin"
-GCPKMS_CMD="SUCCESS=true TEST_FLE_GCP_AUTO=1 just test-eg" $DRIVERS_TOOLS/.evergreen/csfle/gcpkms/run-command.sh
+GCPKMS_CMD="pip install -e \".[test]\" && SUCCESS=true TEST_FLE_GCP_AUTO=1 .evergreen/run-tests.sh" $DRIVERS_TOOLS/.evergreen/csfle/gcpkms/run-command.sh
 echo "Running test ... end"
 just teardown-encryption

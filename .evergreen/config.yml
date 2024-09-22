@@ -782,7 +782,7 @@ pre:
   - func: "prepare resources"
   # - func: "windows fix"
   # - func: "fix absolute paths"
-  # - func: "init test-results"
+  - func: "init test-results"
   # - func: "make files executable"
   - func: "install dependencies"
   - func: "assume ec2 role"
@@ -1381,7 +1381,6 @@ tasks:
 
     - name: "test-aws-lambda-deployed"
       commands:
-        - func: "install dependencies"
         - command: ec2.assume_role
           params:
             role_arn: ${LAMBDA_AWS_ROLE_ARN}
@@ -1946,6 +1945,7 @@ tasks:
           vars:
             VERSION: "latest"
             TOPOLOGY: "server"
+        - func: "install dependencies"
         - command: shell.exec
           type: test
           params:
@@ -1972,6 +1972,7 @@ tasks:
       commands:
       - func: fetch source
       - func: make files executable
+      - func: "install dependencies"
       - func: "bootstrap mongo-orchestration"
         vars:
           VERSION: "latest"

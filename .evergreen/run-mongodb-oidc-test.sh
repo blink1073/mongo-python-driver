@@ -29,4 +29,5 @@ fi
 export TEST_AUTH_OIDC=1
 export COVERAGE=1
 export AUTH="auth"
-just test-eg -- "${@:1}"
+pip install -e ".[test]"
+bash .evergreen/run-tests.sh "${@:1}"

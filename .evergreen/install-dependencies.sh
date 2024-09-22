@@ -24,7 +24,7 @@ mkdir -p ${BIN_DIR}
 
 # Install rust if need be.
 # shellcheck disable=SC2154
-if [ -n "${USE_RUST}" ]; then
+if [ -n "${USE_RUST:-}" ]; then
   # TODO: fix this in drivers-tools:
   # Install once and export the variables.
   # Make it quieter
