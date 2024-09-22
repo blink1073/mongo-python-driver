@@ -42,7 +42,7 @@ JUST_ARGS="--to ${BIN_DIR}"
 if [ "${OS:-}" == "Windows_NT" ]; then
   JUST_ARGS="$JUST_ARGS --target x86_64-pc-windows-msvc"
 fi
-curl --proto '=https' $CURL_ARGS | bash -s -- "${JUST_ARGS}" || {
+curl --proto '=https' $CURL_ARGS | bash -s -- ${JUST_ARGS} || {
   echo "Installing just using cargo..."
   cargo install -q just
   echo "Installing just using cargo... done."
