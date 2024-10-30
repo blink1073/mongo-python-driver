@@ -467,7 +467,7 @@ def create_pyopenssl_variants():
     return variants
 
 
-def create_storage_engine_tests():
+def create_storage_engine_variants():
     host = "rhel8"
     engines = ["InMemory", "MMAPv1"]
     variants = []
@@ -490,10 +490,10 @@ def create_storage_engine_tests():
     return variants
 
 
-def create_versioned_api_tests():
+def create_versioned_api_variants():
     host = "rhel8"
     tags = ["versionedApi_tag"]
-    tasks = [f".standalone .{v} .noauth .nossl .sync_async" for v in get_versions_from("5.0")]
+    tasks = [f".{v} .noauth .nossl .sync_async" for v in get_versions_from("5.0")]
     variants = []
     types = ["require v1", "accept v2"]
 
