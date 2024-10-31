@@ -1317,12 +1317,12 @@ buildvariants:
   # Versioned api tests
   - name: versioned-api-require-v1-rhel8-py3.9-auth
     tasks:
-      - name: .5.0 .noauth .nossl .sync_async
-      - name: .6.0 .noauth .nossl .sync_async
-      - name: .7.0 .noauth .nossl .sync_async
-      - name: .8.0 .noauth .nossl .sync_async
-      - name: .rapid .noauth .nossl .sync_async
-      - name: .latest .noauth .nossl .sync_async
+      - name: .5.0 .auth .ssl .sync_async
+      - name: .6.0 .auth .ssl .sync_async
+      - name: .7.0 .auth .ssl .sync_async
+      - name: .8.0 .auth .ssl .sync_async
+      - name: .rapid .auth .ssl .sync_async
+      - name: .latest .auth .ssl .sync_async
     display_name: Versioned API require v1 RHEL8 py3.9 Auth
     run_on:
       - rhel87-small
@@ -1334,12 +1334,12 @@ buildvariants:
     tags: [versionedApi_tag]
   - name: versioned-api-accept-v2-rhel8-py3.9-auth
     tasks:
-      - name: .5.0 .noauth .nossl .sync_async
-      - name: .6.0 .noauth .nossl .sync_async
-      - name: .7.0 .noauth .nossl .sync_async
-      - name: .8.0 .noauth .nossl .sync_async
-      - name: .rapid .noauth .nossl .sync_async
-      - name: .latest .noauth .nossl .sync_async
+      - name: .5.0 .auth .ssl .sync_async
+      - name: .6.0 .auth .ssl .sync_async
+      - name: .7.0 .auth .ssl .sync_async
+      - name: .8.0 .auth .ssl .sync_async
+      - name: .rapid .auth .ssl .sync_async
+      - name: .latest .auth .ssl .sync_async
     display_name: Versioned API accept v2 RHEL8 py3.9 Auth
     run_on:
       - rhel87-small
@@ -1350,12 +1350,12 @@ buildvariants:
     tags: [versionedApi_tag]
   - name: versioned-api-require-v1-rhel8-py3.13-auth
     tasks:
-      - name: .5.0 .noauth .nossl .sync_async
-      - name: .6.0 .noauth .nossl .sync_async
-      - name: .7.0 .noauth .nossl .sync_async
-      - name: .8.0 .noauth .nossl .sync_async
-      - name: .rapid .noauth .nossl .sync_async
-      - name: .latest .noauth .nossl .sync_async
+      - name: .5.0 .auth .ssl .sync_async
+      - name: .6.0 .auth .ssl .sync_async
+      - name: .7.0 .auth .ssl .sync_async
+      - name: .8.0 .auth .ssl .sync_async
+      - name: .rapid .auth .ssl .sync_async
+      - name: .latest .auth .ssl .sync_async
     display_name: Versioned API require v1 RHEL8 py3.13 Auth
     run_on:
       - rhel87-small
@@ -1367,12 +1367,12 @@ buildvariants:
     tags: [versionedApi_tag]
   - name: versioned-api-accept-v2-rhel8-py3.13-auth
     tasks:
-      - name: .5.0 .noauth .nossl .sync_async
-      - name: .6.0 .noauth .nossl .sync_async
-      - name: .7.0 .noauth .nossl .sync_async
-      - name: .8.0 .noauth .nossl .sync_async
-      - name: .rapid .noauth .nossl .sync_async
-      - name: .latest .noauth .nossl .sync_async
+      - name: .5.0 .auth .ssl .sync_async
+      - name: .6.0 .auth .ssl .sync_async
+      - name: .7.0 .auth .ssl .sync_async
+      - name: .8.0 .auth .ssl .sync_async
+      - name: .rapid .auth .ssl .sync_async
+      - name: .latest .auth .ssl .sync_async
     display_name: Versioned API accept v2 RHEL8 py3.13 Auth
     run_on:
       - rhel87-small

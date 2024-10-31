@@ -493,7 +493,7 @@ def create_storage_engine_variants():
 def create_versioned_api_variants():
     host = "rhel8"
     tags = ["versionedApi_tag"]
-    tasks = [f".{v} .noauth .nossl .sync_async" for v in get_versions_from("5.0")]
+    tasks = [f".{v} .auth .ssl .sync_async" for v in get_versions_from("5.0")]
     variants = []
     types = ["require v1", "accept v2"]
 
