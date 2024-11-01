@@ -497,7 +497,7 @@ def create_versioned_api_variants():
 
     for python in MIN_MAX_PYTHON:
         expansions = dict(AUTH="auth")
-        tasks = [f".{v} .auth .ssl .sync_async" for v in get_versions_from("5.0")]
+        tasks = [f".{v} .noauth .nossl .sync_async" for v in get_versions_from("5.0")]
         # REQUIRE_API_VERSION is set to make drivers-evergreen-tools
         # start a cluster with the requireApiVersion parameter.
         expansions["REQUIRE_API_VERSION"] = "1"
@@ -512,7 +512,7 @@ def create_versioned_api_variants():
 
     for python in MIN_MAX_PYTHON:
         expansions = dict()
-        tasks = [f".{v} .noauth .nossl .sync_async" for v in get_versions_from("5.0")]
+        tasks = [f".{v} .standalone .noauth .nossl .sync_async" for v in get_versions_from("5.0")]
         # Test against a cluster with acceptApiVersion2 but without
         # requireApiVersion, and don't automatically add apiVersion to
         # clients created in the test suite.
