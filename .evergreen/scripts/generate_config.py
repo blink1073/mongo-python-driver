@@ -518,7 +518,7 @@ def create_storage_engine_variants():
     return variants
 
 
-def create_versioned_api_variants():
+def create_stable_api_variants():
     host = DEFAULT_HOST
     tags = ["versionedApi_tag"]
     variants = []
@@ -531,7 +531,7 @@ def create_versioned_api_variants():
         expansions["REQUIRE_API_VERSION"] = "1"
         # MONGODB_API_VERSION is the apiVersion to use in the test suite.
         expansions["MONGODB_API_VERSION"] = "1"
-        base_display_name = "Versioned API require v1"
+        base_display_name = "Stable API require v1"
         display_name = get_display_name(base_display_name, host, python=python, **expansions)
         variant = create_variant(
             tasks, display_name, host=host, python=python, tags=tags, expansions=expansions
@@ -545,7 +545,7 @@ def create_versioned_api_variants():
         # requireApiVersion, and don't automatically add apiVersion to
         # clients created in the test suite.
         expansions["ORCHESTRATION_FILE"] = "versioned-api-testing.json"
-        base_display_name = "Versioned API accept v2"
+        base_display_name = "Stable API accept v2"
         display_name = get_display_name(base_display_name, host, python=python, **expansions)
         variant = create_variant(
             tasks, display_name, host=host, python=python, tags=tags, expansions=expansions
