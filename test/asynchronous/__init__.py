@@ -468,7 +468,7 @@ class AsyncClientContext:
                 await self.init()
                 # Always raise SkipTest if we can't connect to MongoDB
                 if not self.connected:
-                    raise SkipTest(f"{os.environ}")
+                    raise SkipTest(f"{self.auth_enabled=} {self.pair=} {db_user=} {db_pwd=}")
                     # pair = await self.pair
                     # raise SkipTest(f"Cannot connect to MongoDB on {pair}")
                 if iscoroutinefunction(condition):
