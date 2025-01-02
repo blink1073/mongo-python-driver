@@ -171,6 +171,7 @@ class AsyncClientContext:
 
     async def _connect(self, host, port, **kwargs):
         kwargs.update(self.default_client_options)
+        print("attempting to connect with", kwargs)
         client: AsyncMongoClient = pymongo.AsyncMongoClient(
             host, port, serverSelectionTimeoutMS=5000, **kwargs
         )
