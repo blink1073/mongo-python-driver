@@ -193,6 +193,7 @@ class ClientContext:
             client.close()
 
     def _init_client(self):
+        print("in init client")
         self.mongoses = []
         self.connection_attempts = []
         self.client = self._connect(host, port)
@@ -216,13 +217,14 @@ class ClientContext:
 
         if self.client:
             self.connected = True
-
+            print("trying to get admin info")
             if self.serverless:
                 self.auth_enabled = True
             else:
                 try:
                     self.cmd_line = self.client.admin.command("getCmdLineOpts")
                 except pymongo.errors.OperationFailure as e:
+                    print(e)
                     assert e.details is not None
                     msg = e.details.get("errmsg", "")
                     if e.code == 13 or "unauthorized" in msg or "login" in msg:
@@ -231,6 +233,7 @@ class ClientContext:
                     else:
                         raise
                 else:
+                    print("checking for auth enabled")
                     self.auth_enabled = self._server_started_with_auth()
 
             if self.auth_enabled:
