@@ -196,7 +196,9 @@ class ClientContext:
         print("in init client")
         self.mongoses = []
         self.connection_attempts = []
+        print("in init client 2")
         self.client = self._connect(host, port)
+        print("in init client 3", self.client)
         if self.client is not None:
             # Return early when connected to dataLake as mongohoused does not
             # support the getCmdLineOpts command and is tested without TLS.
@@ -206,7 +208,7 @@ class ClientContext:
                 self.client = self._connect(host, port, username=db_user, password=db_pwd)
                 self.connected = True
                 return
-
+        print("in init client 4", self.client)
         if HAVE_SSL and not self.client:
             # Is MongoDB configured for SSL?
             self.client = self._connect(host, port, **TLS_OPTIONS)
@@ -215,6 +217,7 @@ class ClientContext:
                 self.default_client_options.update(TLS_OPTIONS)
                 self.tlsCertificateKeyFile = True
 
+        print("in init client 5", self.client)
         if self.client:
             self.connected = True
             print("trying to get admin info")
