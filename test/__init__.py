@@ -466,8 +466,9 @@ class ClientContext:
                 self.init()
                 # Always raise SkipTest if we can't connect to MongoDB
                 if not self.connected:
-                    pair = self.pair
-                    raise SkipTest(f"Cannot connect to MongoDB on {pair}")
+                    raise SkipTest(f"{os.environ}")
+                    # pair = self.pair
+                    # raise SkipTest(f"Cannot connect to MongoDB on {pair}")
                 if iscoroutinefunction(condition):
                     if condition():
                         if wraps_async:
