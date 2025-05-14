@@ -82,6 +82,7 @@ struct module_state {
     PyObject* _from_uuid_str;
     PyObject* _as_uuid_str;
     PyObject* _from_bid_str;
+    PyObject* _datetime_class;
     int64_t min_millis;
     int64_t max_millis;
 };
@@ -250,7 +251,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
 static int write_raw_doc(buffer_t buffer, PyObject* raw, PyObject* _raw);
 
 /* Date stuff */
-static PyObject* datetime_from_millis(long long millis) {
+static PyObject* datetime_from_millis(PyObject* datetime_class, long long millis) {
     /* To encode a datetime instance like datetime(9999, 12, 31, 23, 59, 59, 999999)
      * we follow these steps:
      * 1. Calculate a timestamp in seconds:       253402300799
@@ -286,13 +287,20 @@ static PyObject* datetime_from_millis(long long millis) {
     struct TM timeinfo;
     cbson_gmtime64_r(&seconds, &timeinfo);
 
-    datetime = PyDateTime_FromDateAndTime(timeinfo.tm_year + 1900,
-                                          timeinfo.tm_mon + 1,
-                                          timeinfo.tm_mday,
-                                          timeinfo.tm_hour,
-                                          timeinfo.tm_min,
-                                          timeinfo.tm_sec,
-                                          microseconds);
+    PyObject *args = Py_BuildValue("(iiiiiii)",
+                               timeinfo.tm_year + 1900,
+                               timeinfo.tm_mon + 1,
+                               timeinfo.tm_mday,
+                               timeinfo.tm_hour,
+                               timeinfo.tm_min,
+                               timeinfo.tm_sec,
+                               microseconds);
+
+    datetime = PyObject_CallObject(datetime_class, args);
+
+    // Cleanup references.
+    Py_DECREF(args);
+
     if(!datetime) {
         PyObject *etype = NULL, *evalue = NULL, *etrace = NULL;
 
@@ -462,7 +470,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
         }
     }
 
-    naive = datetime_from_millis(millis);
+    naive = datetime_from_millis(state->_datetime_class, millis);
     if (!naive) {
         goto invalid;
     }
@@ -650,7 +658,8 @@ static int _load_python_objects(PyObject* module) {
         _load_object(&min_datetime_ms, "bson.datetime_ms", "_MIN_UTC_MS") ||
         _load_object(&max_datetime_ms, "bson.datetime_ms", "_MAX_UTC_MS") ||
         _load_object(&state->min_datetime, "bson.datetime_ms", "_MIN_UTC") ||
-        _load_object(&state->max_datetime, "bson.datetime_ms", "_MAX_UTC")) {
+        _load_object(&state->max_datetime, "bson.datetime_ms", "_MAX_UTC") ||
+        _load_object(&state->_datetime_class, "datetime", "datetime")) {
         return 1;
     }
 
