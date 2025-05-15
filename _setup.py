@@ -110,6 +110,8 @@ ext_modules = [
         "bson._cbson",
         include_dirs=["bson"],
         sources=["bson/_cbsonmodule.c", "bson/time64.c", "bson/buffer.c"],
+        define_macros=[("Py_LIMITED_API", "0x03110000")],  # Use Python 3.11 limited API
+        py_limited_api=True,  # Enable the py_limited_api flag
     ),
     Extension(
         "pymongo._cmessage",
@@ -120,6 +122,8 @@ ext_modules = [
             "bson/time64.c",
             "bson/buffer.c",
         ],
+        define_macros=[("Py_LIMITED_API", "0x03110000")],  # Use Python 3.11 limited API
+        py_limited_api=True,  # Enable the py_limited_api flag
     ),
 ]
 

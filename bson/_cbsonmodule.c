@@ -83,6 +83,7 @@ struct module_state {
     PyObject* _as_uuid_str;
     PyObject* _from_bid_str;
     PyObject* _datetime_class;
+    PyObject* _timedelta_class;
     int64_t min_millis;
     int64_t max_millis;
 };
@@ -334,19 +335,140 @@ static PyObject* datetime_from_millis(PyObject* datetime_class, long long millis
     return datetime;
 }
 
+/* Limited API compatible function to check if a Python object is a `datetime.timedelta`. */
+int _delta_Check(PyObject* timedelta_class, PyObject* obj) {
+    if (obj == NULL) {
+        return 0;  // NULL objects are not valid `timedelta`
+    }
+
+    // Determine if 'obj' is an instance of 'datetime.timedelta'
+    int is_timedelta = PyObject_IsInstance(obj, timedelta_class);
+
+    // Handle errors in `PyObject_IsInstance`
+    if (is_timedelta == -1) {
+        // An exception occurred during the type-check
+        return 0;  // Return 0 to indicate a failed check
+    }
+
+    // Return 1 if obj is a `timedelta`, otherwise return 0
+    return is_timedelta;
+}
+
+/* Limited API-compatible function to check if a Python object is a `datetime.datetime`.*/
+int _dateTime_Check(PyObject* datetime_class, PyObject* obj) {
+    if (obj == NULL) {
+        // NULL objects cannot be `datetime.datetime`
+        return 0;
+    }
+
+    // Determine if 'obj' is an instance of 'datetime.datetime'
+    int is_datetime = PyObject_IsInstance(obj, datetime_class);
+
+    // Handle errors in `PyObject_IsInstance`
+    if (is_datetime == -1) {
+        // An exception occurred during the type-check
+        return 0;  // Return 0 to indicate a failed check
+    }
+
+    // Return 1 if obj is a `datetime.datetime`, otherwise return 0
+    return is_datetime;
+}
+
+/* Convert utcoffset to milliseconds using the Python Limited API */
+int64_t _convert_utcoffset_to_millis(PyObject *utcoffset) {
+    PyObject *days = PyObject_GetAttrString(utcoffset, "days");
+    PyObject *seconds = PyObject_GetAttrString(utcoffset, "seconds");
+    PyObject *microseconds = PyObject_GetAttrString(utcoffset, "microseconds");
+
+    if (!days || !seconds || !microseconds) {
+        Py_XDECREF(days);
+        Py_XDECREF(seconds);
+        Py_XDECREF(microseconds);
+        PyErr_SetString(PyExc_AttributeError, "Failed to retrieve timedelta attributes");
+        return -1; // Handle errors appropriately
+    }
+
+    int64_t days_val = PyLong_AsLongLong(days);
+    int64_t seconds_val = PyLong_AsLongLong(seconds);
+    int64_t microseconds_val = PyLong_AsLongLong(microseconds);
+
+    Py_DECREF(days);
+    Py_DECREF(seconds);
+    Py_DECREF(microseconds);
+
+    if (PyErr_Occurred()) {
+        // Handle cases where conversion to int64_t fails
+        return -1; // Handle errors appropriately
+    }
+
+    int64_t millis_offset = (days_val * (int64_t)86400 + seconds_val) * (int64_t)1000 + (microseconds_val / 1000);
+    return millis_offset;
+}
+
+
 static long long millis_from_datetime(PyObject* datetime) {
     struct TM timeinfo;
     long long millis;
 
-    timeinfo.tm_year = PyDateTime_GET_YEAR(datetime) - 1900;
-    timeinfo.tm_mon = PyDateTime_GET_MONTH(datetime) - 1;
-    timeinfo.tm_mday = PyDateTime_GET_DAY(datetime);
-    timeinfo.tm_hour = PyDateTime_DATE_GET_HOUR(datetime);
-    timeinfo.tm_min = PyDateTime_DATE_GET_MINUTE(datetime);
-    timeinfo.tm_sec = PyDateTime_DATE_GET_SECOND(datetime);
+    // Use the PyObject API to access properties
+    PyObject* py_year = PyObject_GetAttrString(datetime, "year");
+    PyObject* py_month = PyObject_GetAttrString(datetime, "month");
+    PyObject* py_day = PyObject_GetAttrString(datetime, "day");
+    PyObject* py_hour = PyObject_GetAttrString(datetime, "hour");
+    PyObject* py_minute = PyObject_GetAttrString(datetime, "minute");
+    PyObject* py_second = PyObject_GetAttrString(datetime, "second");
+
+    if (py_year == NULL || py_month == NULL || py_day == NULL ||
+        py_hour == NULL || py_minute == NULL || py_second == NULL) {
+        // Handle errors and cleanup
+        Py_XDECREF(py_year);
+        Py_XDECREF(py_month);
+        Py_XDECREF(py_day);
+        Py_XDECREF(py_hour);
+        Py_XDECREF(py_minute);
+        Py_XDECREF(py_second);
+        return 0;
+    }
+
+    // Convert attributes to C types
+    timeinfo.tm_year = PyLong_AsLong(py_year) - 1900;
+    timeinfo.tm_mon = PyLong_AsLong(py_month) - 1;
+    timeinfo.tm_mday = PyLong_AsLong(py_day);
+    timeinfo.tm_hour = PyLong_AsLong(py_hour);
+    timeinfo.tm_min = PyLong_AsLong(py_minute);
+    timeinfo.tm_sec = PyLong_AsLong(py_second);
+
+    // Cleanup
+    Py_DECREF(py_year);
+    Py_DECREF(py_month);
+    Py_DECREF(py_day);
+    Py_DECREF(py_hour);
+    Py_DECREF(py_minute);
+    Py_DECREF(py_second);
 
     millis = cbson_timegm64(&timeinfo) * 1000;
-    millis += PyDateTime_DATE_GET_MICROSECOND(datetime) / 1000;
+
+    // Access the 'microsecond' attribute using PyObject_GetAttrString
+    PyObject* py_microsecond = PyObject_GetAttrString(datetime, "microsecond");
+    if (py_microsecond == NULL) {
+        // Handle error (e.g., attribute does not exist)
+        return 0;
+    }
+
+    // Convert the value to a C long
+    long microsecond = PyLong_AsLong(py_microsecond);
+    if (PyErr_Occurred()) {
+        // Handle conversion error
+        Py_DECREF(py_microsecond);
+        return 0;
+    }
+
+    // Perform the addition
+    millis += microsecond / 1000;
+
+    // Clean up reference to the Python object
+    Py_DECREF(py_microsecond);
+
     return millis;
 }
 
@@ -414,7 +536,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
                 return 0;
             }
             if (utcoffset != Py_None) {
-                if (!PyDelta_Check(utcoffset)) {
+                if (!_delta_Check(state->_timedelta_class, utcoffset)) {
                     PyObject* BSONError = _error("BSONError");
                     if (BSONError) {
                         PyErr_SetString(BSONError, "tzinfo.utcoffset() did not return a datetime.timedelta");
@@ -423,9 +545,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
                     Py_DECREF(utcoffset);
                     return 0;
                 }
-                min_millis_offset = (PyDateTime_DELTA_GET_DAYS(utcoffset) * (int64_t)86400 +
-                                     PyDateTime_DELTA_GET_SECONDS(utcoffset)) * (int64_t)1000 +
-                                     (PyDateTime_DELTA_GET_MICROSECONDS(utcoffset) / 1000);
+                min_millis_offset = _convert_utcoffset_to_millis(utcoffset);
             }
             Py_DECREF(utcoffset);
             utcoffset = PyObject_CallMethodObjArgs(options->tzinfo, state->_utcoffset_str, state->max_datetime, NULL);
@@ -433,7 +553,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
                 return 0;
             }
             if (utcoffset != Py_None) {
-                if (!PyDelta_Check(utcoffset)) {
+                if (!_delta_Check(state->_timedelta_class, utcoffset)) {
                     PyObject* BSONError = _error("BSONError");
                     if (BSONError) {
                         PyErr_SetString(BSONError, "tzinfo.utcoffset() did not return a datetime.timedelta");
@@ -442,9 +562,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
                     Py_DECREF(utcoffset);
                     return 0;
                 }
-                max_millis_offset = (PyDateTime_DELTA_GET_DAYS(utcoffset) * (int64_t)86400 +
-                                     PyDateTime_DELTA_GET_SECONDS(utcoffset)) * (int64_t)1000 +
-                                     (PyDateTime_DELTA_GET_MICROSECONDS(utcoffset) / 1000);
+                max_millis_offset = _convert_utcoffset_to_millis(utcoffset);
             }
             Py_DECREF(utcoffset);
         }
@@ -536,11 +654,11 @@ static int write_unicode(buffer_t buffer, PyObject* py_string) {
     if (!encoded) {
         return 0;
     }
-    data = PyBytes_AS_STRING(encoded);
+    data = PyBytes_AsString(encoded);
     if (!data)
         goto unicodefail;
 
-    if ((size = _downcast_and_check(PyBytes_GET_SIZE(encoded), 1)) == -1)
+    if ((size = _downcast_and_check(PyBytes_Size(encoded), 1)) == -1)
         goto unicodefail;
 
     if (!buffer_write_int32(buffer, (int32_t)size))
@@ -659,7 +777,9 @@ static int _load_python_objects(PyObject* module) {
         _load_object(&max_datetime_ms, "bson.datetime_ms", "_MAX_UTC_MS") ||
         _load_object(&state->min_datetime, "bson.datetime_ms", "_MIN_UTC") ||
         _load_object(&state->max_datetime, "bson.datetime_ms", "_MAX_UTC") ||
-        _load_object(&state->_datetime_class, "datetime", "datetime")) {
+        _load_object(&state->_datetime_class, "datetime", "datetime") ||
+        _load_object(&state->_timedelta_class, "datetime", "timedela"))
+    {
         return 1;
     }
 
@@ -704,7 +824,7 @@ static int _load_python_objects(PyObject* module) {
         Py_DECREF(empty_string);
         return 1;
     }
-    Py_INCREF(Py_TYPE(compiled));
+    Py_INCREF((PyObject *)Py_TYPE(compiled));
     state->REType = Py_TYPE(compiled);
     Py_DECREF(empty_string);
     Py_DECREF(compiled);
@@ -1345,9 +1465,9 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
                 return 0;
             }
             if (is_list) {
-                item_value = PyList_GET_ITEM(value, i);
+                item_value = PyList_GetItem(value, i);
             } else {
-                item_value = PyTuple_GET_ITEM(value, i);
+                item_value = PyTuple_GetItem(value, i);
             }
             if (!item_value) {
                 return 0;
@@ -1371,10 +1491,10 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
     } else if (PyBytes_Check(value)) {
         char subtype = 0;
         int size;
-        const char* data = PyBytes_AS_STRING(value);
+        const char* data = PyBytes_AsString(value);
         if (!data)
             return 0;
-        if ((size = _downcast_and_check(PyBytes_GET_SIZE(value), 0)) == -1)
+        if ((size = _downcast_and_check(PyBytes_Size(value), 0)) == -1)
             return 0;
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x05;
         if (!buffer_write_int32(buffer, (int32_t)size)) {
@@ -1390,7 +1510,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
     } else if (PyUnicode_Check(value)) {
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x02;
         return write_unicode(buffer, value);
-    } else if (PyDateTime_Check(value)) {
+    } else if (_dateTime_Check(state->_datetime_class, value)) {
         long long millis;
         PyObject* utcoffset = PyObject_CallMethodObjArgs(value, state->_utcoffset_str , NULL);
         if (utcoffset == NULL)
@@ -1568,11 +1688,11 @@ int decode_and_write_pair(PyObject* self, buffer_t buffer,
         if (!encoded) {
             return 0;
         }
-        if (!(data = PyBytes_AS_STRING(encoded))) {
+        if (!(data = PyBytes_AsString(encoded))) {
             Py_DECREF(encoded);
             return 0;
         }
-        if ((size = _downcast_and_check(PyBytes_GET_SIZE(encoded), 1)) == -1) {
+        if ((size = _downcast_and_check(PyBytes_Size(encoded), 1)) == -1) {
             Py_DECREF(encoded);
             return 0;
         }
@@ -1673,11 +1793,12 @@ void handle_invalid_doc_error(PyObject* dict) {
             if (dict_str == NULL) {
                 goto cleanup;
             }
-            const char * dict_str_utf8 = PyUnicode_AsUTF8(dict_str);
+            Py_ssize_t dict_str_size;
+            const char * dict_str_utf8 = PyUnicode_AsUTF8AndSize(dict_str, &dict_str_size);
             if (dict_str_utf8 == NULL) {
                 goto cleanup;
             }
-            const char * msg_utf8 = PyUnicode_AsUTF8(msg);
+            const char * msg_utf8 = PyUnicode_AsUTF8AndSize(msg, &dict_str_size);
             if (msg_utf8 == NULL) {
                 goto cleanup;
             }
@@ -2705,7 +2826,7 @@ static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "argument to _element_to_dict must be a bytes object");
         return NULL;
     }
-    string = PyBytes_AS_STRING(bson);
+    string = PyBytes_AsString(bson);
 
     new_position = _element_to_dict(self, string, position, max, &options, raw_array, &name, &value);
     if (new_position < 0) {
@@ -3205,11 +3326,6 @@ _cbson_exec(PyObject *m)
 {
     PyObject *c_api_object;
     static void *_cbson_API[_cbson_API_POINTER_COUNT];
-
-    PyDateTime_IMPORT;
-    if (PyDateTimeAPI == NULL) {
-        INITERROR;
-    }
 
     /* Export C API */
     _cbson_API[_cbson_buffer_write_bytes_INDEX] = (void *) buffer_write_bytes;
