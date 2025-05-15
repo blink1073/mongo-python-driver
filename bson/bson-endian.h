@@ -18,6 +18,7 @@
 #ifndef BSON_ENDIAN_H
 #define BSON_ENDIAN_H
 
+#include <string.h>
 
 #if defined(__sun)
 # include <sys/byteorder.h>

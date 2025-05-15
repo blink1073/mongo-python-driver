@@ -46,6 +46,7 @@ cbson_gmtime64_r() is a 64-bit equivalent of gmtime_r().
 /* Including Python.h fixes issues with interpreters built with -std=c99. */
 #define PY_SSIZE_T_CLEAN
 #include "Python.h"
+#include <string.h>
 
 #include <time.h>
 #include "time64.h"
