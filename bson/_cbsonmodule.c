@@ -81,6 +81,16 @@ struct module_state {
     PyObject* _utcoffset_str;
     PyObject* _from_uuid_str;
     PyObject* _as_uuid_str;
+    PyObject* _year_str;
+    PyObject* _month_str;
+    PyObject* _day_str;
+    PyObject* _hour_str;
+    PyObject* _minute_str;
+    PyObject* _second_str;
+    PyObject* _microsecond_str;
+    PyObject* _days_str;
+    PyObject* _seconds_str;
+    PyObject* _microseconds_str;
     PyObject* _from_bid_str;
     PyObject* _datetime_class;
     PyObject* _timedelta_class;
@@ -375,10 +385,10 @@ int _dateTime_Check(PyObject* datetime_class, PyObject* obj) {
 }
 
 /* Convert utcoffset to milliseconds using the Python Limited API */
-int64_t _convert_utcoffset_to_millis(PyObject *utcoffset) {
-    PyObject *days = PyObject_GetAttrString(utcoffset, "days");
-    PyObject *seconds = PyObject_GetAttrString(utcoffset, "seconds");
-    PyObject *microseconds = PyObject_GetAttrString(utcoffset, "microseconds");
+int64_t _convert_utcoffset_to_millis(struct module_state *state, PyObject *utcoffset) {
+    PyObject *days = PyObject_GetAttr(utcoffset, state->_days_str);
+    PyObject *seconds = PyObject_GetAttr(utcoffset, state->_seconds_str);
+    PyObject *microseconds = PyObject_GetAttr(utcoffset, state->_microseconds_str);
 
     if (!days || !seconds || !microseconds) {
         Py_XDECREF(days);
@@ -406,17 +416,17 @@ int64_t _convert_utcoffset_to_millis(PyObject *utcoffset) {
 }
 
 
-static long long millis_from_datetime(PyObject* datetime) {
+static long long millis_from_datetime(struct module_state *state, PyObject* datetime) {
     struct TM timeinfo;
     long long millis;
 
     // Use the PyObject API to access properties
-    PyObject* py_year = PyObject_GetAttrString(datetime, "year");
-    PyObject* py_month = PyObject_GetAttrString(datetime, "month");
-    PyObject* py_day = PyObject_GetAttrString(datetime, "day");
-    PyObject* py_hour = PyObject_GetAttrString(datetime, "hour");
-    PyObject* py_minute = PyObject_GetAttrString(datetime, "minute");
-    PyObject* py_second = PyObject_GetAttrString(datetime, "second");
+    PyObject* py_year = PyObject_GetAttr(datetime, state->_year_str);
+    PyObject* py_month = PyObject_GetAttr(datetime, state->_month_str);
+    PyObject* py_day = PyObject_GetAttr(datetime, state->_day_str);
+    PyObject* py_hour = PyObject_GetAttr(datetime, state->_hour_str);
+    PyObject* py_minute = PyObject_GetAttr(datetime, state->_minute_str);
+    PyObject* py_second = PyObject_GetAttr(datetime, state->_second_str);
 
     if (py_year == NULL || py_month == NULL || py_day == NULL ||
         py_hour == NULL || py_minute == NULL || py_second == NULL) {
@@ -449,7 +459,7 @@ static long long millis_from_datetime(PyObject* datetime) {
     millis = cbson_timegm64(&timeinfo) * 1000;
 
     // Access the 'microsecond' attribute using PyObject_GetAttrString
-    PyObject* py_microsecond = PyObject_GetAttrString(datetime, "microsecond");
+    PyObject* py_microsecond = PyObject_GetAttr(datetime, state->_microsecond_str);
     if (py_microsecond == NULL) {
         // Handle error (e.g., attribute does not exist)
         return 0;
@@ -545,7 +555,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
                     Py_DECREF(utcoffset);
                     return 0;
                 }
-                min_millis_offset = _convert_utcoffset_to_millis(utcoffset);
+                min_millis_offset = _convert_utcoffset_to_millis(state, utcoffset);
             }
             Py_DECREF(utcoffset);
             utcoffset = PyObject_CallMethodObjArgs(options->tzinfo, state->_utcoffset_str, state->max_datetime, NULL);
@@ -562,7 +572,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
                     Py_DECREF(utcoffset);
                     return 0;
                 }
-                max_millis_offset = _convert_utcoffset_to_millis(utcoffset);
+                max_millis_offset = _convert_utcoffset_to_millis(state, utcoffset);
             }
             Py_DECREF(utcoffset);
         }
@@ -755,6 +765,16 @@ static int _load_python_objects(PyObject* module) {
         (state->_utcoffset_str = PyUnicode_FromString("utcoffset")) &&
         (state->_from_uuid_str = PyUnicode_FromString("from_uuid")) &&
         (state->_as_uuid_str = PyUnicode_FromString("as_uuid")) &&
+        (state->_year_str = PyUnicode_FromString("year")) &&
+        (state->_month_str = PyUnicode_FromString("month")) &&
+        (state->_day_str = PyUnicode_FromString("day")) &&
+        (state->_hour_str = PyUnicode_FromString("hour")) &&
+        (state->_minute_str = PyUnicode_FromString("minute")) &&
+        (state->_second_str = PyUnicode_FromString("second")) &&
+        (state->_microsecond_str = PyUnicode_FromString("microsecond")) &&
+        (state->_days_str = PyUnicode_FromString("days")) &&
+        (state->_seconds_str = PyUnicode_FromString("seconds")) &&
+        (state->_microseconds_str = PyUnicode_FromString("microseconds")) &&
         (state->_from_bid_str = PyUnicode_FromString("from_bid")))) {
             return 1;
     }
@@ -1521,10 +1541,10 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
                 Py_DECREF(utcoffset);
                 return 0;
             }
-            millis = millis_from_datetime(result);
+            millis = millis_from_datetime(state, result);
             Py_DECREF(result);
         } else {
-            millis = millis_from_datetime(value);
+            millis = millis_from_datetime(state, value);
         }
         Py_DECREF(utcoffset);
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x09;
@@ -3262,11 +3282,23 @@ static int _cbson_traverse(PyObject *m, visitproc visit, void *arg) {
     Py_VISIT(state->_utcoffset_str);
     Py_VISIT(state->_from_uuid_str);
     Py_VISIT(state->_as_uuid_str);
+    Py_VISIT(state->_year_str);
+    Py_VISIT(state->_month_str);
+    Py_VISIT(state->_day_str);
+    Py_VISIT(state->_hour_str);
+    Py_VISIT(state->_minute_str);
+    Py_VISIT(state->_second_str);
+    Py_VISIT(state->_microsecond_str);
+    Py_VISIT(state->_days_str);
+    Py_VISIT(state->_seconds_str);
+    Py_VISIT(state->_microseconds_str);
     Py_VISIT(state->_from_bid_str);
     Py_VISIT(state->min_datetime);
     Py_VISIT(state->max_datetime);
     Py_VISIT(state->replace_args);
     Py_VISIT(state->replace_kwargs);
+    Py_VISIT(state->_timedelta_class);
+    Py_VISIT(state->_datetime_class);
     return 0;
 }
 
@@ -3310,11 +3342,23 @@ static int _cbson_clear(PyObject *m) {
     Py_CLEAR(state->_utcoffset_str);
     Py_CLEAR(state->_from_uuid_str);
     Py_CLEAR(state->_as_uuid_str);
+    Py_CLEAR(state->_year_str);
+    Py_CLEAR(state->_month_str);
+    Py_CLEAR(state->_day_str);
+    Py_CLEAR(state->_hour_str);
+    Py_CLEAR(state->_minute_str);
+    Py_CLEAR(state->_second_str);
+    Py_CLEAR(state->_microsecond_str);
+    Py_CLEAR(state->_days_str);
+    Py_CLEAR(state->_seconds_str);
+    Py_CLEAR(state->_microseconds_str);
     Py_CLEAR(state->_from_bid_str);
     Py_CLEAR(state->min_datetime);
     Py_CLEAR(state->max_datetime);
     Py_CLEAR(state->replace_args);
     Py_CLEAR(state->replace_kwargs);
+    Py_CLEAR(state->_timedelta_class);
+    Py_CLEAR(state->_datetime_class);
     return 0;
 }
 
