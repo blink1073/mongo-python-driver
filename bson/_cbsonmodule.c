@@ -778,7 +778,7 @@ static int _load_python_objects(PyObject* module) {
         _load_object(&state->min_datetime, "bson.datetime_ms", "_MIN_UTC") ||
         _load_object(&state->max_datetime, "bson.datetime_ms", "_MAX_UTC") ||
         _load_object(&state->_datetime_class, "datetime", "datetime") ||
-        _load_object(&state->_timedelta_class, "datetime", "timedela"))
+        _load_object(&state->_timedelta_class, "datetime", "timedelta"))
     {
         return 1;
     }
