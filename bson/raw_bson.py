@@ -60,7 +60,9 @@ from bson.codec_options import DEFAULT_CODEC_OPTIONS as DEFAULT
 
 
 def _inflate_bson(
-    bson_bytes: bytes, codec_options: CodecOptions[RawBSONDocument], raw_array: bool = False
+    bson_bytes: bytes | memoryview,
+    codec_options: CodecOptions[RawBSONDocument],
+    raw_array: bool = False,
 ) -> dict[str, Any]:
     """Inflates the top level fields of a BSON document.
 

@@ -103,7 +103,7 @@ def wait_for_read(conn: BaseConnection, deadline: Optional[float]) -> None:
             raise socket.timeout("timed out")
 
 
-def receive_data(conn: BaseConnection, length: int, deadline: Optional[float]) -> memoryview:
+def receive_data(conn: BaseConnection, length: int, deadline: Optional[float]) -> bytes:
     buf = bytearray(length)
     mv = memoryview(buf)
     bytes_read = 0
@@ -131,7 +131,7 @@ def receive_data(conn: BaseConnection, length: int, deadline: Optional[float]) -
                         short_timeout = _POLL_TIMEOUT
                     conn.set_conn_timeout(short_timeout)
 
-                chunk_length = conn.conn.recv_into(mv[bytes_read:])
+                chunk_length = conn.conn.recv_into(bytes(mv[bytes_read:]))
             except BLOCKING_IO_ERRORS:
                 if conn.cancel_context.cancelled:
                     raise _OperationCancelled("operation cancelled") from None
@@ -163,7 +163,7 @@ def receive_data(conn: BaseConnection, length: int, deadline: Optional[float]) -
     finally:
         conn.set_conn_timeout(orig_timeout)
 
-    return mv
+    return bytes(mv)
 
 
 class NetworkingInterfaceBase:
@@ -533,14 +533,14 @@ class PyMongoKMSProtocol(PyMongoBaseProtocol):
             fut = self._pending_listeners.popleft()
             fut.set_result(b"")
 
-    def _read(self, bytes_needed: int) -> memoryview:
+    def _read(self, bytes_needed: int) -> bytes:
         """Read bytes."""
         # Send the bytes to the listener.
         if self._bytes_ready < bytes_needed:
             bytes_needed = self._bytes_ready
         self._bytes_ready -= bytes_needed
 
-        output_buf = bytearray(bytes_needed)
+        output_buf = memoryview(bytearray(bytes_needed))
         n_remaining = bytes_needed
         out_index = 0
         while n_remaining > 0:
@@ -557,7 +557,7 @@ class PyMongoKMSProtocol(PyMongoBaseProtocol):
                 output_buf[out_index : out_index + buf_size] = buffer[:]
                 out_index += buf_size
                 n_remaining -= buf_size
-        return memoryview(output_buf)
+        return bytes(output_buf)
 
 
 async def async_sendall(conn: PyMongoBaseProtocol, buf: bytes) -> None:
