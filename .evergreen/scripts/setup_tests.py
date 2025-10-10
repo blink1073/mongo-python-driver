@@ -33,6 +33,7 @@ PASS_THROUGH_ENV = [
     "DEBUG_LOG",
     "PYTHON_BINARY",
     "PYTHON_VERSION",
+    "UV_PYTHON",
     "REQUIRE_FIPS",
     "IS_WIN32",
 ]
