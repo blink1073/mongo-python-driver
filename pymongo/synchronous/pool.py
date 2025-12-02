@@ -730,7 +730,9 @@ class Pool:
         # and returned to pool from the left side. Stale sockets removed
         # from the right side.
         self.conns: collections.deque[Connection] = collections.deque()
+        self._conns_lock = _create_lock()
         self.active_contexts: set[_CancellationContext] = set()
+        self._active_contexts_lock = _create_lock()
         # The main lock for the pool.  The lock should only be used to protect
         # updating attributes.
         # If possible, avoid any additional work while holding the lock.
@@ -793,6 +795,7 @@ class Pool:
             )
         # Similar to active_sockets but includes threads in the wait queue.
         self.operation_count: int = 0
+        self._operation_count_lock = _create_lock()
         # Retain references to pinned connections to prevent the CPython GC
         # from thinking that a cursor's pinned connection can be GC'd when the
         # cursor is GC'd (see PYTHON-2751).
@@ -835,23 +838,23 @@ class Pool:
         old_state = self.state
         if self.closed:
             return
-        if self.opts.pause_enabled and pause and not self.opts.load_balanced:
-            with self.lock:
-                old_state, self.state = self.state, PoolState.PAUSED
 
         with self.lock:
+            if self.opts.pause_enabled and pause and not self.opts.load_balanced:
+                old_state, self.state = self.state, PoolState.PAUSED
             self.gen.inc(service_id)
-        newpid = os.getpid()
-        if self.pid != newpid:
-            self.pid = newpid
-        with self.lock:
+            newpid = os.getpid()
+
+            if self.pid != newpid:
+                self.pid = newpid
+
             self.active_sockets = 0
+        with self._conns_lock:
+            if service_id is None:
+                sockets, self.conns = self.conns, collections.deque()
+        with self._operation_count_lock:
             self.operation_count = 0
-        if service_id is None:
-            new_conns = collections.deque()
-            with self.lock:
-                sockets, self.conns = self.conns, new_conns
-        else:
+        if service_id is not None:
             discard: collections.deque = collections.deque()  # type: ignore[type-arg]
             keep: collections.deque = collections.deque()  # type: ignore[type-arg]
             for conn in self.conns.copy():
@@ -860,7 +863,7 @@ class Pool:
                 else:
                     keep.append(conn)
             sockets = discard
-            with self.lock:
+            with self._conns_lock:
                 self.conns = keep
 
             if close:
@@ -996,8 +999,9 @@ class Pool:
                 if self.gen.get_overall() != reference_generation:
                     close_conn = True
                 if not close_conn:
-                    with self.lock:
+                    with self._conns_lock:
                         self.conns.appendleft(conn)
+                    with self._active_contexts_lock:
                         self.active_contexts.discard(conn.cancel_context)
                 if close_conn:
                     conn.close_conn(ConnectionClosedReason.STALE)
@@ -1024,7 +1028,7 @@ class Pool:
         # Use a temporary context so that interrupt_connections can cancel creating the socket.
         tmp_context = _CancellationContext()
         conn_id = self.next_connection_id
-        with self.lock:
+        with self._active_contexts_lock:
             self.next_connection_id += 1
             self.active_contexts.add(tmp_context)
 
@@ -1046,7 +1050,7 @@ class Pool:
             networking_interface = _configured_socket_interface(self.address, self.opts)
         # Catch KeyboardInterrupt, CancelledError, etc. and cleanup.
         except BaseException as error:
-            with self.lock:
+            with self._active_contexts_lock:
                 self.active_contexts.discard(tmp_context)
             if self.enabled_for_cmap:
                 assert listeners is not None
@@ -1071,7 +1075,7 @@ class Pool:
             raise
 
         conn = Connection(networking_interface, self, self.address, conn_id, self.is_sdam)  # type: ignore[arg-type]
-        with self.lock:
+        with self._active_contexts_lock:
             self.active_contexts.add(conn.cancel_context)
             self.active_contexts.discard(tmp_context)
         if tmp_context.cancelled:
@@ -1086,7 +1090,7 @@ class Pool:
             conn.authenticate()
         # Catch KeyboardInterrupt, CancelledError, etc. and cleanup.
         except BaseException:
-            with self.lock:
+            with self._active_contexts_lock:
                 self.active_contexts.discard(conn.cancel_context)
             conn.close_conn(ConnectionClosedReason.ERROR)
             raise
@@ -1146,7 +1150,7 @@ class Pool:
                 durationMS=duration,
             )
         try:
-            with self.lock:
+            with self._active_contexts_lock:
                 self.active_contexts.add(conn.cancel_context)
             yield conn
         # Catch KeyboardInterrupt, CancelledError, etc. and cleanup.
@@ -1165,11 +1169,11 @@ class Pool:
                 self.checkin(conn)
             raise
         if conn.pinned_txn:
-            with self.lock:
+            with self._active_contexts_lock:
                 self.__pinned_sockets.add(conn)
                 self.ntxns += 1
         elif conn.pinned_cursor:
-            with self.lock:
+            with self._active_contexts_lock:
                 self.__pinned_sockets.add(conn)
                 self.ncursors += 1
         elif conn.active:
@@ -1233,7 +1237,7 @@ class Pool:
                 "Attempted to check out a connection from closed connection pool"
             )
 
-        with self.lock:
+        with self._operation_count_lock:
             self.operation_count += 1
 
         # Get a free socket or create one.
@@ -1282,7 +1286,7 @@ class Pool:
                         self._raise_if_not_ready(checkout_started_time, emit_event=False)
 
                     try:
-                        with self.lock:
+                        with self._conns_lock:
                             conn = self.conns.popleft()
                     except IndexError:
                         self._pending += 1
@@ -1342,10 +1346,9 @@ class Pool:
         conn.active = False
         conn.pinned_txn = False
         conn.pinned_cursor = False
-        with self.lock:
-            self.__pinned_sockets.discard(conn)
         listeners = self.opts._event_listeners
-        with self.lock:
+        with self._active_contexts_lock:
+            self.__pinned_sockets.discard(conn)
             self.active_contexts.discard(conn.cancel_context)
         if self.enabled_for_cmap:
             assert listeners is not None
@@ -1389,7 +1392,7 @@ class Pool:
                 if self.stale_generation(conn.generation, conn.service_id):
                     close_conn = True
                 else:
-                    with self.lock:
+                    with self._conns_lock:
                         self.conns.appendleft(conn)
                     with self._max_connecting_cond:
                         # Notify any threads waiting to create a connection.
@@ -1397,16 +1400,15 @@ class Pool:
                 if close_conn:
                     conn.close_conn(ConnectionClosedReason.STALE)
 
-        with self.lock:
+        with self._active_contexts_lock:
             self.active_sockets -= 1
-            self.operation_count -= 1
-
-        if txn:
-            with self.lock:
+            if txn:
                 self.ntxns -= 1
-        elif cursor:
-            with self.lock:
+            elif cursor:
                 self.ncursors -= 1
+
+        with self._operation_count_lock:
+            self.operation_count -= 1
 
         with self.size_cond:
             self.requests -= 1
