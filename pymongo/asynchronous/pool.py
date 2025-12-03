@@ -841,7 +841,7 @@ class Pool:
         if self.closed:
             return
 
-        with self.lock:
+        async with self.lock:
             if self.opts.pause_enabled and pause and not self.opts.load_balanced:
                 old_state, self.state = self.state, PoolState.PAUSED
             self.gen.inc(service_id)
@@ -851,10 +851,10 @@ class Pool:
                 self.pid = newpid
 
             self.active_sockets = 0
-        with self._conns_lock:
+        async with self._conns_lock:
             if service_id is None:
                 sockets, self.conns = self.conns, collections.deque()
-        with self._operation_count_lock:
+        async with self._operation_count_lock:
             self.operation_count = 0
         if service_id is not None:
             discard: collections.deque = collections.deque()  # type: ignore[type-arg]
@@ -865,11 +865,11 @@ class Pool:
                 else:
                     keep.append(conn)
             sockets = discard
-            with self._conns_lock:
+            async with self._conns_lock:
                 self.conns = keep
 
             if close:
-                with self.lock:
+                async with self.lock:
                     self.state = PoolState.CLOSED
             # Clear the wait queue
             self._max_connecting_cond.notify_all()
@@ -1396,9 +1396,9 @@ class Pool:
                 if self.stale_generation(conn.generation, conn.service_id):
                     close_conn = True
                 else:
-                    with self._conns_lock:
+                    async with self._conns_lock:
                         self.conns.appendleft(conn)
-                    with self._max_connecting_cond:
+                    async with self._max_connecting_cond:
                         # Notify any threads waiting to create a connection.
                         self._max_connecting_cond.notify()
                 if close_conn:
