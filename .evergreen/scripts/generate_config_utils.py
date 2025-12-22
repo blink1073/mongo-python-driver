@@ -24,6 +24,7 @@ from shrub.v3.shrub_service import ShrubService
 ALL_VERSIONS = ["4.2", "4.4", "5.0", "6.0", "7.0", "8.0", "rapid", "latest"]
 CPYTHONS = ["3.10", "3.11", "3.12", "3.13", "3.14t", "3.14"]
 PYPYS = ["pypy3.11"]
+MIN_SUPPORT_VERSIONS = ["3.9", "pypy3.9", "pypy3.10"]
 ALL_PYTHONS = CPYTHONS + PYPYS
 MIN_MAX_PYTHON = [CPYTHONS[0], CPYTHONS[-1]]
 BATCHTIME_WEEK = 10080
@@ -42,7 +43,7 @@ DISPLAY_LOOKUP = dict(
     sync={"sync": "Sync", "async": "Async"},
     coverage={"1": "cov"},
     no_ext={"1": "No C"},
-    test_min_deps={True: "Min Deps"},
+    test_min_deps={"1": "Min Deps"},
 )
 HOSTS = dict()
 
@@ -171,7 +172,7 @@ def get_common_name(base: str, sep: str, **kwargs) -> str:
         display_name = f"{display_name}{sep}{version}"
     for key, value in kwargs.items():
         name = value
-        if key.lower() == "python":
+        if key.lower() in ["python", "toolchain_version"]:
             if not value.startswith("pypy"):
                 name = f"Python{value}"
             else:
