@@ -37,6 +37,7 @@ replacements = {
     "AsyncRawBatchCursor": "RawBatchCursor",
     "AsyncRawBatchCommandCursor": "RawBatchCommandCursor",
     "AsyncClientSession": "ClientSession",
+    "_AsyncBoundSessionContext": "_BoundSessionContext",
     "AsyncChangeStream": "ChangeStream",
     "AsyncCollectionChangeStream": "CollectionChangeStream",
     "AsyncDatabaseChangeStream": "DatabaseChangeStream",
@@ -212,6 +213,7 @@ converted_tests = [
     "test_bulk.py",
     "test_change_stream.py",
     "test_client.py",
+    "test_client_backpressure.py",
     "test_client_bulk_write.py",
     "test_client_context.py",
     "test_client_metadata.py",
@@ -349,7 +351,7 @@ def translate_async_sleeps(lines: list[str]) -> list[str]:
     sleeps = [line for line in lines if "asyncio.sleep" in line]
 
     for line in sleeps:
-        res = re.search(r"asyncio.sleep\(([^()]*)\)", line)
+        res = re.search(r"asyncio\.sleep\(\s*(.*?)\)", line)
         if res:
             old = res[0]
             index = lines.index(line)
@@ -382,8 +384,6 @@ def translate_docstrings(lines: list[str]) -> list[str]:
                 lines[i] = lines[i].replace(k, replacements[k])
             if "Sync" in lines[i] and "Synchronous" not in lines[i] and replacements[k] in lines[i]:
                 lines[i] = lines[i].replace("Sync", "")
-                if "rsApplyStop" in lines[i]:
-                    lines[i] = lines[i].replace("rsApplyStop", "rsSyncApplyStop")
         if "async for" in lines[i] or "async with" in lines[i] or "async def" in lines[i]:
             lines[i] = lines[i].replace("async ", "")
         if "await " in lines[i] and "tailable" not in lines[i]:

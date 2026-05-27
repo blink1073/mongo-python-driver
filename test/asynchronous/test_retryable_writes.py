@@ -21,6 +21,9 @@ import pprint
 import sys
 import threading
 from test.asynchronous.utils import async_set_fail_point, flaky
+from unittest import mock
+
+from pymongo.common import MAX_ADAPTIVE_RETRIES
 
 sys.path[0:0] = [""]
 
@@ -43,14 +46,17 @@ from bson.codec_options import DEFAULT_CODEC_OPTIONS
 from bson.int64 import Int64
 from bson.raw_bson import RawBSONDocument
 from bson.son import SON
+from pymongo import MongoClient
 from pymongo.errors import (
     AutoReconnect,
     ConnectionFailure,
-    OperationFailure,
+    NotPrimaryError,
+    PyMongoError,
     ServerSelectionTimeoutError,
     WriteConcernError,
 )
 from pymongo.monitoring import (
+    CommandFailedEvent,
     CommandSucceededEvent,
     ConnectionCheckedOutEvent,
     ConnectionCheckOutFailedEvent,
@@ -599,6 +605,292 @@ class TestRetryableWritesTxnNumber(IgnoreDeprecationsTest):
                 final_txn_id = session._transaction_id
                 self.assertEqual(Int64(initial_txn_id + 1), sent_txn_id, msg)
                 self.assertEqual(sent_txn_id, final_txn_id, msg)
+
+
+class TestErrorPropagationAfterEncounteringMultipleErrors(AsyncIntegrationTest):
+    # Only run against replica sets as mongos does not propagate the NoWritesPerformed label to the drivers.
+    @async_client_context.require_replica_set
+    # Run against server versions 6.0 and above.
+    @async_client_context.require_version_min(6, 0)  # type: ignore[untyped-decorator]
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.setup_client = MongoClient(**async_client_context.default_client_options)
+        self.addCleanup(self.setup_client.close)
+
+    # TODO: After PYTHON-4595 we can use async event handlers and remove this workaround.
+    def configure_fail_point_sync(self, command_args, off=False) -> None:
+        cmd = {"configureFailPoint": "failCommand"}
+        cmd.update(command_args)
+        if off:
+            cmd["mode"] = "off"
+            cmd.pop("data", None)
+        self.setup_client.admin.command(cmd)
+
+    async def test_01_drivers_return_the_correct_error_when_receiving_only_errors_without_NoWritesPerformed(
+        self
+    ) -> None:
+        # Create a client with retryWrites=true.
+        listener = OvertCommandListener()
+
+        # Configure a fail point with error code 91 (ShutdownInProgress) with the RetryableError and SystemOverloadedError error labels.
+        command_args = {
+            "configureFailPoint": "failCommand",
+            "mode": {"times": 1},
+            "data": {
+                "failCommands": ["insert"],
+                "errorLabels": ["RetryableError", "SystemOverloadedError"],
+                "errorCode": 91,
+            },
+        }
+
+        # Via the command monitoring CommandFailedEvent, configure a fail point with error code 10107 (NotWritablePrimary).
+        command_args_inner = {
+            "configureFailPoint": "failCommand",
+            "mode": "alwaysOn",
+            "data": {
+                "failCommands": ["insert"],
+                "errorCode": 10107,
+                "errorLabels": ["RetryableError", "SystemOverloadedError"],
+            },
+        }
+
+        def failed(event: CommandFailedEvent) -> None:
+            # Configure the 10107 fail point command only if the the failed event is for the 91 error configured in step 2.
+            if listener.failed_events:
+                return
+            assert event.failure["code"] == 91
+            self.configure_fail_point_sync(command_args_inner)
+            self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+            listener.failed_events.append(event)
+
+        listener.failed = failed
+
+        client = await self.async_rs_client(retryWrites=True, event_listeners=[listener])
+
+        self.configure_fail_point_sync(command_args)
+        self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+
+        # Attempt an insertOne operation on any record for any database and collection.
+        # Expect the insertOne to fail with a server error.
+        with self.assertRaises(NotPrimaryError) as exc:
+            await client.test.test.insert_one({})
+
+        # Assert that the error code of the server error is 10107.
+        assert exc.exception.errors["code"] == 10107  # type:ignore[call-overload]
+
+    async def test_02_drivers_return_the_correct_error_when_receiving_only_errors_with_NoWritesPerformed(
+        self
+    ) -> None:
+        # Create a client with retryWrites=true.
+        listener = OvertCommandListener()
+
+        # Configure a fail point with error code 91 (ShutdownInProgress) with the RetryableError and SystemOverloadedError error labels.
+        command_args = {
+            "configureFailPoint": "failCommand",
+            "mode": {"times": 1},
+            "data": {
+                "failCommands": ["insert"],
+                "errorLabels": ["RetryableError", "SystemOverloadedError", "NoWritesPerformed"],
+                "errorCode": 91,
+            },
+        }
+
+        # Via the command monitoring CommandFailedEvent, configure a fail point with error code `10107` (NotWritablePrimary)
+        # and a NoWritesPerformed label.
+        command_args_inner = {
+            "configureFailPoint": "failCommand",
+            "mode": "alwaysOn",
+            "data": {
+                "failCommands": ["insert"],
+                "errorCode": 10107,
+                "errorLabels": ["RetryableError", "SystemOverloadedError", "NoWritesPerformed"],
+            },
+        }
+
+        def failed(event: CommandFailedEvent) -> None:
+            if listener.failed_events:
+                return
+            # Configure the 10107 fail point command only if the the failed event is for the 91 error configured in step 2.
+            assert event.failure["code"] == 91
+            self.configure_fail_point_sync(command_args_inner)
+            self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+            listener.failed_events.append(event)
+
+        listener.failed = failed
+
+        client = await self.async_rs_client(retryWrites=True, event_listeners=[listener])
+
+        self.configure_fail_point_sync(command_args)
+        self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+
+        # Attempt an insertOne operation on any record for any database and collection.
+        # Expect the insertOne to fail with a server error.
+        with self.assertRaises(NotPrimaryError) as exc:
+            await client.test.test.insert_one({})
+
+        # Assert that the error code of the server error is 91.
+        assert exc.exception.errors["code"] == 91  # type:ignore[call-overload]
+
+    async def test_03_drivers_return_the_correct_error_when_receiving_some_errors_with_NoWritesPerformed_and_some_without_NoWritesPerformed(
+        self
+    ) -> None:
+        # Create a client with retryWrites=true.
+        listener = OvertCommandListener()
+
+        # Configure the client to listen to CommandFailedEvents. In the attached listener, configure a fail point with error
+        # code `91` (NotWritablePrimary) and the `NoWritesPerformed`, `RetryableError` and `SystemOverloadedError` labels.
+        command_args_inner = {
+            "configureFailPoint": "failCommand",
+            "mode": "alwaysOn",
+            "data": {
+                "failCommands": ["insert"],
+                "errorLabels": ["RetryableError", "SystemOverloadedError", "NoWritesPerformed"],
+                "errorCode": 91,
+            },
+        }
+
+        # Configure a fail point with error code `91` (ShutdownInProgress) with the `RetryableError` and
+        # `SystemOverloadedError` error labels but without the `NoWritesPerformed` error label.
+        command_args = {
+            "configureFailPoint": "failCommand",
+            "mode": {"times": 1},
+            "data": {
+                "failCommands": ["insert"],
+                "errorCode": 91,
+                "errorLabels": ["RetryableError", "SystemOverloadedError"],
+            },
+        }
+
+        def failed(event: CommandFailedEvent) -> None:
+            # Configure the fail point command only if the failed event is for the 91 error configured in step 2.
+            if listener.failed_events:
+                return
+            assert event.failure["code"] == 91
+            self.configure_fail_point_sync(command_args_inner)
+            self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+            listener.failed_events.append(event)
+
+        listener.failed = failed
+
+        client = await self.async_rs_client(retryWrites=True, event_listeners=[listener])
+
+        self.configure_fail_point_sync(command_args)
+        self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+
+        # Attempt an insertOne operation on any record for any database and collection.
+        # Expect the insertOne to fail with a server error.
+        with self.assertRaises(PyMongoError) as exc:
+            await client.test.test.insert_one({})
+
+        # Assert that the error code of the server error is 91.
+        assert exc.exception.errors["code"] == 91
+        # Assert that the error does not contain the error label `NoWritesPerformed`.
+        assert "NoWritesPerformed" not in exc.exception.errors["errorLabels"]
+
+    async def test_overload_then_nonoverload_retries_increased_writes(self) -> None:
+        # Create a client with retryWrites=true.
+        listener = OvertCommandListener()
+
+        # Configure the client to listen to CommandFailedEvents. In the attached listener, configure a fail point with error
+        # code `91` (ShutdownInProgress) and `RetryableError` and `SystemOverloadedError` labels.
+        overload_fail_point = {
+            "configureFailPoint": "failCommand",
+            "mode": {"times": 1},
+            "data": {
+                "failCommands": ["insert"],
+                "errorLabels": ["RetryableError", "SystemOverloadedError"],
+                "errorCode": 91,
+            },
+        }
+
+        # Configure a fail point with error code `91` (ShutdownInProgress) with the `RetryableError` and `RetryableWriteError` error labels.
+        non_overload_fail_point = {
+            "configureFailPoint": "failCommand",
+            "mode": "alwaysOn",
+            "data": {
+                "failCommands": ["insert"],
+                "errorCode": 91,
+                "errorLabels": ["RetryableError", "RetryableWriteError"],
+            },
+        }
+
+        def failed(event: CommandFailedEvent) -> None:
+            # Configure the fail point command only if the failed event is for the 91 error configured in step 2.
+            if listener.failed_events:
+                return
+            assert event.failure["code"] == 91
+            self.configure_fail_point_sync(non_overload_fail_point)
+            self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+            listener.failed_events.append(event)
+
+        listener.failed = failed
+
+        client = await self.async_rs_client(retryWrites=True, event_listeners=[listener])
+
+        self.configure_fail_point_sync(overload_fail_point)
+        self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+
+        with self.assertRaises(PyMongoError):
+            await client.test.test.insert_one({"x": 1})
+
+        started_inserts = [e for e in listener.started_events if e.command_name == "insert"]
+        self.assertEqual(len(started_inserts), MAX_ADAPTIVE_RETRIES + 1)
+
+    async def test_backoff_is_not_applied_for_non_overload_errors(self):
+        if _IS_SYNC:
+            mock_target = "pymongo.synchronous.helpers._RetryPolicy.backoff"
+        else:
+            mock_target = "pymongo.asynchronous.helpers._RetryPolicy.backoff"
+
+        # Create a client.
+        listener = OvertCommandListener()
+
+        # Configure the client to listen to CommandFailedEvents. In the attached listener, configure a fail point with error
+        # code `91` (ShutdownInProgress) and `RetryableError` and `SystemOverloadedError` labels.
+        overload_fail_point = {
+            "configureFailPoint": "failCommand",
+            "mode": {"times": 1},
+            "data": {
+                "failCommands": ["insert"],
+                "errorLabels": ["RetryableError", "SystemOverloadedError"],
+                "errorCode": 91,
+            },
+        }
+
+        # Configure a fail point with error code `91` (ShutdownInProgress) with only the `RetryableError` error label.
+        non_overload_fail_point = {
+            "configureFailPoint": "failCommand",
+            "mode": "alwaysOn",
+            "data": {
+                "failCommands": ["insert"],
+                "errorCode": 91,
+                "errorLabels": ["RetryableError", "RetryableWriteError"],
+            },
+        }
+
+        def failed(event: CommandFailedEvent) -> None:
+            # Configure the fail point command only if the failed event is for the 91 error configured in step 2.
+            if listener.failed_events:
+                return
+            assert event.failure["code"] == 91
+            self.configure_fail_point_sync(non_overload_fail_point)
+            self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+            listener.failed_events.append(event)
+
+        listener.failed = failed
+
+        client = await self.async_rs_client(event_listeners=[listener])
+
+        self.configure_fail_point_sync(overload_fail_point)
+        self.addCleanup(self.configure_fail_point_sync, {}, off=True)
+
+        # Perform a findOne operation with coll. Expect the operation to fail.
+        with mock.patch(mock_target, return_value=0) as mock_backoff:
+            with self.assertRaises(PyMongoError):
+                await client.test.test.insert_one({})
+
+        # Assert that backoff was applied only once for the initial overload error and not for the subsequent non-overload retryable errors.
+        self.assertEqual(mock_backoff.call_count, 1)
 
 
 if __name__ == "__main__":

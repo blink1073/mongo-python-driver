@@ -15,7 +15,6 @@
 """Test the client_session module."""
 from __future__ import annotations
 
-import asyncio
 import copy
 import sys
 import time
@@ -23,8 +22,6 @@ from inspect import iscoroutinefunction
 from io import BytesIO
 from test.helpers import ExceptionCatchingTask
 from typing import Any, Callable, List, Set, Tuple
-
-from pymongo.synchronous.mongo_client import MongoClient
 
 sys.path[0:0] = [""]
 
@@ -45,7 +42,7 @@ from test.utils_shared import (
 
 from bson import DBRef
 from gridfs.synchronous.grid_file import GridFS, GridFSBucket
-from pymongo import ASCENDING, MongoClient, _csot, monitoring
+from pymongo import ASCENDING, MongoClient, monitoring
 from pymongo.common import _MAX_END_SESSIONS
 from pymongo.errors import ConfigurationError, InvalidOperation, OperationFailure
 from pymongo.operations import IndexModel, InsertOne, UpdateOne
@@ -188,6 +185,52 @@ class TestSession(IntegrationTest):
                         session_ids(client),
                         f"{f.__name__} did not return implicit session to pool",
                     )
+
+        # Explicit bound session
+        for f, args, kw in ops:
+            with client.start_session() as s:
+                with s.bind():
+                    listener.reset()
+                    s._materialize()
+                    last_use = s._server_session.last_use
+                    start = time.monotonic()
+                    self.assertLessEqual(last_use, start)
+                    # In case "f" modifies its inputs.
+                    args = copy.copy(args)
+                    kw = copy.copy(kw)
+                    f(*args, **kw)
+                    self.assertGreaterEqual(len(listener.started_events), 1)
+                    for event in listener.started_events:
+                        self.assertIn(
+                            "lsid",
+                            event.command,
+                            f"{f.__name__} sent no lsid with {event.command_name}",
+                        )
+
+                        self.assertEqual(
+                            s.session_id,
+                            event.command["lsid"],
+                            f"{f.__name__} sent wrong lsid with {event.command_name}",
+                        )
+
+                    self.assertFalse(s.has_ended)
+
+            self.assertTrue(s.has_ended)
+            with self.assertRaisesRegex(InvalidOperation, "ended session"):
+                with s.bind():
+                    f(*args, **kw)
+
+            # Test a session cannot be used on another client.
+            with self.client2.start_session() as s:
+                with s.bind():
+                    # In case "f" modifies its inputs.
+                    args = copy.copy(args)
+                    kw = copy.copy(kw)
+                    with self.assertRaisesRegex(
+                        InvalidOperation,
+                        "Only the client that created the bound session can perform operations within its context block",
+                    ):
+                        f(*args, **kw)
 
     def test_implicit_sessions_checkout(self):
         # "To confirm that implicit sessions only allocate their server session after a
@@ -824,6 +867,106 @@ class TestSession(IntegrationTest):
         client = self.client
         with client.start_session() as s:
             self.assertRaises(TypeError, lambda: copy.copy(s))
+
+    def test_nested_session_binding(self):
+        coll = self.client.pymongo_test.test
+        coll.insert_one({"x": 1})
+
+        session1 = self.client.start_session()
+        session2 = self.client.start_session()
+        session1._materialize()
+        session2._materialize()
+        try:
+            self.listener.reset()
+            # Uses implicit session
+            coll.find_one()
+            implicit_lsid = self.listener.started_events[0].command.get("lsid")
+            self.assertIsNotNone(implicit_lsid)
+            self.assertNotEqual(implicit_lsid, session1.session_id)
+            self.assertNotEqual(implicit_lsid, session2.session_id)
+
+            with session1.bind(end_session=False):
+                self.listener.reset()
+                # Uses bound session1
+                coll.find_one()
+                session1_lsid = self.listener.started_events[0].command.get("lsid")
+                self.assertEqual(session1_lsid, session1.session_id)
+
+                with session2.bind(end_session=False):
+                    self.listener.reset()
+                    # Uses bound session2
+                    coll.find_one()
+                    session2_lsid = self.listener.started_events[0].command.get("lsid")
+                    self.assertEqual(session2_lsid, session2.session_id)
+                    self.assertNotEqual(session2_lsid, session1.session_id)
+
+                self.listener.reset()
+                # Use bound session1 again
+                coll.find_one()
+                session1_lsid = self.listener.started_events[0].command.get("lsid")
+                self.assertEqual(session1_lsid, session1.session_id)
+                self.assertNotEqual(session1_lsid, session2.session_id)
+
+            self.listener.reset()
+            # Uses implicit session
+            coll.find_one()
+            implicit_lsid = self.listener.started_events[0].command.get("lsid")
+            self.assertIsNotNone(implicit_lsid)
+            self.assertNotEqual(implicit_lsid, session1.session_id)
+            self.assertNotEqual(implicit_lsid, session2.session_id)
+
+        finally:
+            session1.end_session()
+            session2.end_session()
+
+    def test_session_binding_end_session(self):
+        coll = self.client.pymongo_test.test
+        coll.insert_one({"x": 1})
+
+        with self.client.start_session().bind() as s1:
+            coll.find_one()
+
+        self.assertTrue(s1.has_ended)
+
+        with self.client.start_session().bind(end_session=False) as s2:
+            coll.find_one()
+
+        self.assertFalse(s2.has_ended)
+
+        s2.end_session()
+
+    def test_getmore_preserves_lsid_after_session_support_lost(self):
+        listener = OvertCommandListener()
+        client = self.rs_or_single_client(event_listeners=[listener], maxPoolSize=1)
+        coll = client.pymongo_test.test
+        coll.drop()
+        coll.insert_many([{"x": i} for i in range(10)])
+        self.addCleanup(coll.drop)
+
+        with client.start_session() as s:
+            cursor = coll.find({}, batch_size=2, session=s)
+            next(cursor)
+
+            find_event = next(e for e in listener.started_events if e.command_name == "find")
+            lsid = find_event.command["lsid"]
+
+            # Simulate a node stepping down: mark idle connections as not supporting sessions.
+            for server in client._topology._servers.values():
+                for conn in server.pool.conns:
+                    conn.supports_sessions = False
+
+            listener.reset()
+            cursor.to_list()
+
+        getmore_events = [e for e in listener.started_events if e.command_name == "getMore"]
+        self.assertGreater(len(getmore_events), 0, "expected at least one getMore command")
+        for event in getmore_events:
+            self.assertIn(
+                "lsid", event.command, "getMore must include lsid when session is materialized"
+            )
+            self.assertEqual(
+                lsid, event.command["lsid"], "getMore lsid must match the session lsid from find"
+            )
 
 
 class TestCausalConsistency(UnitTest):

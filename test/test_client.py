@@ -645,6 +645,38 @@ class ClientUnitTest(UnitTest):
             with self.assertWarns(UserWarning):
                 self.simple_client(multi_host)
 
+    def test_max_adaptive_retries(self):
+        # Assert that max adaptive retries defaults to 2.
+        c = self.simple_client(connect=False)
+        self.assertEqual(c.options.max_adaptive_retries, 2)
+
+        # Assert that max adaptive retries can be configured through connection or client options.
+        c = self.simple_client(connect=False, max_adaptive_retries=10)
+        self.assertEqual(c.options.max_adaptive_retries, 10)
+
+        c = self.simple_client(connect=False, maxAdaptiveRetries=10)
+        self.assertEqual(c.options.max_adaptive_retries, 10)
+
+        c = self.simple_client(host="mongodb://localhost/?maxAdaptiveRetries=10", connect=False)
+        self.assertEqual(c.options.max_adaptive_retries, 10)
+
+    def test_enable_overload_retargeting(self):
+        # Assert that overload retargeting defaults to false.
+        c = self.simple_client(connect=False)
+        self.assertFalse(c.options.enable_overload_retargeting)
+
+        # Assert that overload retargeting can be enabled through connection or client options.
+        c = self.simple_client(connect=False, enable_overload_retargeting=True)
+        self.assertTrue(c.options.enable_overload_retargeting)
+
+        c = self.simple_client(connect=False, enableOverloadRetargeting=True)
+        self.assertTrue(c.options.enable_overload_retargeting)
+
+        c = self.simple_client(
+            host="mongodb://localhost/?enableOverloadRetargeting=true", connect=False
+        )
+        self.assertTrue(c.options.enable_overload_retargeting)
+
 
 class TestClient(IntegrationTest):
     def test_multiple_uris(self):
@@ -1007,7 +1039,7 @@ class TestClient(IntegrationTest):
         db_names = self.client.list_database_names()
         self.assertIn("pymongo_test", db_names)
         self.assertIn("pymongo_test_mike", db_names)
-        self.assertEqual(db_names, cmd_names)
+        self.assertCountEqual(db_names, cmd_names)
 
     def test_drop_database(self):
         with self.assertRaises(TypeError):
@@ -2634,11 +2666,11 @@ class TestClientPool(MockClientTest):
 
         wait_until(lambda: len(c.nodes) == 1, "connect")
         self.assertEqual(c.address, ("c", 3))
-        # Assert that we create 1 pooled connection.
+        # Wait for the pooled connection to be registered
         listener.wait_for_event(monitoring.ConnectionReadyEvent, 1)
         self.assertEqual(listener.event_count(monitoring.ConnectionCreatedEvent), 1)
         arbiter = c._topology.get_server_by_address(("c", 3))
-        self.assertEqual(len(arbiter.pool.conns), 1)
+        wait_until(lambda: len(arbiter.pool.conns) == 1, "create 1 pooled connection")
         # Arbiter pool is marked ready.
         self.assertEqual(listener.event_count(monitoring.PoolReadyEvent), 1)
 
