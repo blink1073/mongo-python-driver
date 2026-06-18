@@ -17,6 +17,9 @@
 #ifndef BUFFER_H
 #define BUFFER_H
 
+#define PY_SSIZE_T_CLEAN
+#include "Python.h"
+
 /* Note: if any of these functions return a failure condition then the buffer
  * has already been freed. */
 
@@ -41,11 +44,26 @@ buffer_position pymongo_buffer_save_space(buffer_t buffer, int size);
  * Return non-zero on allocation failure. */
 int pymongo_buffer_write(buffer_t buffer, const char* data, int size);
 
+/* Write a single byte to `buffer` at `pos`.
+ * `pos` must have been reserved with pymongo_buffer_save_space; no resize occurs. */
+void pymongo_buffer_write_byte_at(buffer_t buffer, buffer_position pos, char byte);
+
+/* Write a little-endian int32 to `buffer` at `pos`.
+ * `pos` must have been reserved with pymongo_buffer_save_space; no resize occurs. */
+void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t data);
+
 /* Getters for the internals of a buffer_t.
  * Should try to avoid using these as much as possible
- * since they break the abstraction. */
+ * since they break the abstraction.
+ * WARNING: the pointer returned by pymongo_buffer_get_buffer is invalidated
+ * by any subsequent call to pymongo_buffer_write. Never cache it across a write. */
 buffer_position pymongo_buffer_get_position(buffer_t buffer);
 char* pymongo_buffer_get_buffer(buffer_t buffer);
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position);
+
+/* Trim the buffer to the bytes written, return the underlying PyByteArray, and
+ * free the buffer_t struct. Steals the reference — caller owns the object.
+ * Return NULL on failure (OOM during trim). */
+PyObject* pymongo_buffer_finish(buffer_t buffer);
 
 #endif
