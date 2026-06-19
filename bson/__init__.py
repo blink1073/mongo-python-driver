@@ -1214,7 +1214,10 @@ def _array_of_documents_to_buffer(data: Union[memoryview, bytes]) -> bytes:
 
 
 if _USE_C:
-    _array_of_documents_to_buffer = _cbson._array_of_documents_to_buffer
+    _cbson_array_of_documents_to_buffer = _cbson._array_of_documents_to_buffer
+
+    def _array_of_documents_to_buffer(data: Union[memoryview, bytes]) -> bytes:
+        return bytes(_cbson_array_of_documents_to_buffer(data))
 
 
 def _convert_raw_document_lists_to_streams(document: Any) -> None:
