@@ -991,7 +991,7 @@ def _element_to_bson(key: Any, value: Any, check_keys: bool, opts: CodecOptions[
 
 def _dict_to_bson(
     doc: Any, check_keys: bool, opts: CodecOptions[Any], top_level: bool = True
-) -> bytearray:
+) -> bytes:
     """Encode a document to BSON."""
     if _raw_document_class(doc):
         return cast(bytes, doc.raw)
@@ -1009,7 +1009,7 @@ def _dict_to_bson(
         raise TypeError(f"encoder expected a mapping type but got: {doc!r}") from None
 
     encoded = b"".join(elements)
-    return bytearray(_PACK_INT(len(encoded) + 5) + encoded + b"\x00")
+    return _PACK_INT(len(encoded) + 5) + encoded + b"\x00"
 
 
 if _USE_C:

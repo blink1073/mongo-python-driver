@@ -22,6 +22,14 @@
 #include "bson-endian.h"
 #include "buffer.h"
 
+/* Py_BEGIN_CRITICAL_SECTION / Py_END_CRITICAL_SECTION were introduced in
+ * Python 3.13 for free-threaded builds. Provide no-op fallbacks so the code
+ * compiles unchanged on older CPython and PyPy. */
+#ifndef Py_BEGIN_CRITICAL_SECTION
+#  define Py_BEGIN_CRITICAL_SECTION(op)
+#  define Py_END_CRITICAL_SECTION()
+#endif
+
 #define INITIAL_BUFFER_SIZE 256
 
 /* buffer_t is backed by a PyByteArray. The buffer_t struct is the sole owner

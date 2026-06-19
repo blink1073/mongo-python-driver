@@ -6,7 +6,6 @@ Each test maps to a specific memory safety concern identified during the spike.
 from __future__ import annotations
 
 import threading
-import tracemalloc
 
 import pytest
 
@@ -14,6 +13,8 @@ import bson
 
 pytestmark = pytest.mark.default
 from bson import DEFAULT_CODEC_OPTIONS, _dict_to_bson
+
+_requires_c_ext = pytest.mark.skipif(not bson.has_c(), reason="C extension not available")
 
 
 class TestResizeWithNestedBackfill:
@@ -92,6 +93,7 @@ class TestPublicAPIReturnTypes:
         result = bson.encode({"x": 1})
         assert type(result) is bytes, f"expected bytes, got {type(result)}"
 
+    @_requires_c_ext
     def test_dict_to_bson_returns_bytearray(self):
         result = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
         assert type(result) is bytearray, f"expected bytearray, got {type(result)}"  # type: ignore[comparison-overlap]
@@ -104,6 +106,7 @@ class TestPublicAPIReturnTypes:
 class TestIsValidAcceptsBytearray:
     """bson.is_valid() must accept bytearray after the isinstance fix."""
 
+    @_requires_c_ext
     def test_is_valid_accepts_bytearray(self):
         ba = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
         assert isinstance(ba, bytearray)
@@ -122,6 +125,7 @@ class TestEncodeFailureNoLeak:
     """
 
     def test_no_leak_on_repeated_failures(self):
+        tracemalloc = pytest.importorskip("tracemalloc")
         tracemalloc.start()
         for _ in range(1000):
             with pytest.raises(Exception):  # noqa: B017
