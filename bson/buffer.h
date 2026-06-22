@@ -54,11 +54,8 @@ void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t
 
 /* Getters for the internals of a buffer_t.
  * Should try to avoid using these as much as possible
- * since they break the abstraction.
- * WARNING: the pointer returned by pymongo_buffer_get_buffer is invalidated
- * by any subsequent call to pymongo_buffer_write. Never cache it across a write. */
+ * since they break the abstraction. */
 buffer_position pymongo_buffer_get_position(buffer_t buffer);
-char* pymongo_buffer_get_buffer(buffer_t buffer);
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position);
 
 /* Trim the buffer to the bytes written, return the underlying PyByteArray, and
