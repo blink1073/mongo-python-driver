@@ -1902,7 +1902,10 @@ class TestPyByteArrayBuffer(unittest.TestCase):
                 bson.encode({1: "non-string key"})  # type: ignore[arg-type,dict-item]
         _, peak = tm.get_traced_memory()
         tm.stop()
-        self.assertLess(peak, 5 * 1024 * 1024, f"peak memory {peak} bytes exceeds 5 MiB")
+        # Each failed encode allocates and immediately frees a small buffer,
+        # so legitimate peak usage is a few KB. 100 KiB is a generous ceiling
+        # that will still catch any buffer that leaks on the error path.
+        self.assertLess(peak, 100 * 1024, f"peak memory {peak} bytes exceeds 100 KiB")
 
 
 if __name__ == "__main__":
