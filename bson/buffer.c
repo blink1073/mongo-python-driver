@@ -53,6 +53,8 @@ struct buffer {
     int position;
 };
 
+/* Allocate and return a new buffer.
+ * Return NULL and sets MemoryError on allocation failure. */
 buffer_t pymongo_buffer_new(void) {
     buffer_t buffer = (buffer_t)malloc(sizeof(struct buffer));
     if (buffer == NULL) {
@@ -78,6 +80,8 @@ buffer_t pymongo_buffer_new(void) {
     return buffer;
 }
 
+/* Free the memory allocated for `buffer`.
+ * Return non-zero on failure. */
 int pymongo_buffer_free(buffer_t buffer) {
     if (buffer == NULL) {
         return 1;
@@ -146,6 +150,9 @@ static int buffer_assure_space(buffer_t buffer, int size) {
     return buffer_grow(buffer, new_size);
 }
 
+/* Save `size` bytes from the current position in `buffer` (and grow if needed).
+ * Return offset for writing, or -1 on failure.
+ * Sets MemoryError or ValueError on failure. */
 buffer_position pymongo_buffer_save_space(buffer_t buffer, int size) {
     int position = buffer->position;
     if (buffer_assure_space(buffer, size) != 0) {
@@ -155,6 +162,9 @@ buffer_position pymongo_buffer_save_space(buffer_t buffer, int size) {
     return position;
 }
 
+/* Write `size` bytes from `data` to `buffer` (and grow if needed).
+ * Return non-zero on failure.
+ * Sets MemoryError or ValueError on failure. */
 int pymongo_buffer_write(buffer_t buffer, const char* data, int size) {
     if (buffer_assure_space(buffer, size) != 0) {
         return 1;
