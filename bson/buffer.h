@@ -62,9 +62,6 @@ buffer_position pymongo_buffer_get_position(buffer_t buffer);
  * a prior call to pymongo_buffer_get_position. */
 void pymongo_buffer_rollback(buffer_t buffer, buffer_position position);
 
-/* For debugging only; returns a borrowed reference; the buffer remains the owner. */
-PyObject* pymongo_buffer_get_bytearray(buffer_t buffer);
-
 /* Success path: trim the buffer to the bytes written, return the underlying
  * PyByteArray, and free the buffer_t struct. Steals the reference — caller
  * owns the object. Return NULL on failure (OOM during trim). */

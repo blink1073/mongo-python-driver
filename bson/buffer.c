@@ -207,10 +207,6 @@ int pymongo_buffer_get_position(buffer_t buffer) {
     return buffer->position;
 }
 
-PyObject* pymongo_buffer_get_bytearray(buffer_t buffer) {
-    return buffer->bytearray;  /* borrowed reference; for debugging only */
-}
-
 void pymongo_buffer_rollback(buffer_t buffer, buffer_position position) {
     assert(position >= 0 && position <= buffer->position);
     buffer->position = position;
