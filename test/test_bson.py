@@ -1892,10 +1892,8 @@ class TestPyByteArrayBuffer(unittest.TestCase):
         with self.assertRaises(TypeError):
             bson.is_valid("not bytes")  # type: ignore[arg-type]
 
+    @unittest.skipIf(sys.implementation.name == "pypy", "tracemalloc is not available on PyPy")
     def test_encode_failure_no_leak(self):
-        tracemalloc = importlib.util.find_spec("tracemalloc")
-        if tracemalloc is None:
-            self.skipTest("tracemalloc not available")
         import tracemalloc as tm
 
         tm.start()
