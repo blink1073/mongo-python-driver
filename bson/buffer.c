@@ -118,10 +118,11 @@ static int buffer_grow(buffer_t buffer, int min_length) {
         }
     }
 
+    /* See struct comment for why the per-object lock is required here.
+     * Update cached ptr and capacity under the same lock so they stay in sync. */
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
     result = PyByteArray_Resize(buffer->bytearray, size);
     if (result == 0) {
-        /* Update cached ptr and capacity while we hold the lock. */
         buffer->ptr = PyByteArray_AS_STRING(buffer->bytearray);
         buffer->capacity = size;
     }
@@ -171,9 +172,10 @@ int pymongo_buffer_write(buffer_t buffer, const char* data, int size) {
     if (buffer_assure_space(buffer, size) != 0) {
         return 1;
     }
+    /* See struct comment for why the per-object lock is required here.
+     * buffer->ptr is valid: capacity check above guarantees no resize since
+     * we last updated ptr in buffer_grow. */
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
-    /* buffer->ptr is valid: sole-owner invariant + capacity check above means
-     * no resize can have occurred between the check and this write. */
     memcpy(buffer->ptr + buffer->position, data, size);
     Py_END_CRITICAL_SECTION();
     buffer->position += size;
@@ -181,6 +183,8 @@ int pymongo_buffer_write(buffer_t buffer, const char* data, int size) {
 }
 
 void pymongo_buffer_write_byte_at(buffer_t buffer, buffer_position pos, char byte) {
+    /* See struct comment for why the per-object lock is required here.
+     * pos was reserved by pymongo_buffer_save_space; no resize occurs. */
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
     buffer->ptr[pos] = byte;
     Py_END_CRITICAL_SECTION();
@@ -188,6 +192,7 @@ void pymongo_buffer_write_byte_at(buffer_t buffer, buffer_position pos, char byt
 
 void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t data) {
     uint32_t data_le = BSON_UINT32_TO_LE(data);
+    /* See struct comment for why the per-object lock is required here. */
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
     memcpy(buffer->ptr + pos, &data_le, 4);
     Py_END_CRITICAL_SECTION();
@@ -209,6 +214,7 @@ PyObject* pymongo_buffer_finish(buffer_t buffer) {
     PyObject* ba;
     assert(buffer->bytearray != NULL);
 
+    /* See struct comment for why the per-object lock is required here. */
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
     result = PyByteArray_Resize(buffer->bytearray, buffer->position);
     Py_END_CRITICAL_SECTION();
