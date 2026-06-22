@@ -32,7 +32,8 @@ typedef int buffer_position;
  * Return NULL on allocation failure. */
 buffer_t pymongo_buffer_new(void);
 
-/* Free the memory allocated for `buffer`.
+/* Error path: discard `buffer` without returning data.
+ * Call when encoding fails before reaching pymongo_buffer_finish.
  * Return non-zero on failure. */
 int pymongo_buffer_free(buffer_t buffer);
 
@@ -58,9 +59,9 @@ void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t
 buffer_position pymongo_buffer_get_position(buffer_t buffer);
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position);
 
-/* Trim the buffer to the bytes written, return the underlying PyByteArray, and
- * free the buffer_t struct. Steals the reference — caller owns the object.
- * Return NULL on failure (OOM during trim). */
+/* Success path: trim the buffer to the bytes written, return the underlying
+ * PyByteArray, and free the buffer_t struct. Steals the reference — caller
+ * owns the object. Return NULL on failure (OOM during trim). */
 PyObject* pymongo_buffer_finish(buffer_t buffer);
 
 #endif
