@@ -204,14 +204,15 @@ void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t
 }
 
 int pymongo_buffer_get_position(buffer_t buffer) {
-    return buffer->position;
+    return buffer->position;  /* bytes written so far */
 }
 
 PyObject* pymongo_buffer_get_bytearray(buffer_t buffer) {
-    return buffer->bytearray;
+    return buffer->bytearray;  /* borrowed reference; for debugging only */
 }
 
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position) {
+    /* Rewind/seek the write cursor; no bounds check. */
     buffer->position = new_position;
 }
 

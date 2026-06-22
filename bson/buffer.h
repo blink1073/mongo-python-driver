@@ -53,14 +53,10 @@ void pymongo_buffer_write_byte_at(buffer_t buffer, buffer_position pos, char byt
  * `pos` must have been reserved with pymongo_buffer_save_space; no resize occurs. */
 void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t data);
 
-/* Getters for the internals of a buffer_t.
- * Should try to avoid using these as much as possible
- * since they break the abstraction. */
+/* Internal accessors — not part of the public API; break the abstraction. */
 buffer_position pymongo_buffer_get_position(buffer_t buffer);
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position);
-
-/* Return a borrowed reference to the underlying PyByteArray for debugging.
- * Do not store or release the reference; the buffer remains the owner. */
+/* For debugging only; returns a borrowed reference; the buffer remains the owner. */
 PyObject* pymongo_buffer_get_bytearray(buffer_t buffer);
 
 /* Success path: trim the buffer to the bytes written, return the underlying

@@ -729,7 +729,7 @@ _batched_write_command(
     }
 
     /* Write type byte for array */
-    *(pymongo_buffer_get_buffer(buffer) + (pymongo_buffer_get_position(buffer) - 1)) = 0x4;
+    pymongo_buffer_write_byte_at(buffer, pymongo_buffer_get_position(buffer) - 1, 0x4);
 
     switch (op) {
     case _INSERT:
