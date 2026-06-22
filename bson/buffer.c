@@ -62,8 +62,9 @@ buffer_t pymongo_buffer_new(void) {
         return NULL;
     }
     /* Use an empty bytearray + Resize instead of FromStringAndSize(NULL, N) to
-     * avoid zero-initialising the initial buffer (Resize uses realloc; it does
-     * not zero new bytes beyond the NUL terminator). */
+     * avoid zero-initializing the initial buffer (Resize uses realloc; it does
+     * not zero new bytes beyond the NUL terminator). This matches the behavior
+     * of the original malloc-backed implementation. */
     buffer->bytearray = PyByteArray_FromStringAndSize("", 0);
     if (buffer->bytearray == NULL) {
         free(buffer);
