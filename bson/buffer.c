@@ -184,16 +184,20 @@ int pymongo_buffer_write(buffer_t buffer, const char* data, int size) {
 }
 
 void pymongo_buffer_write_byte_at(buffer_t buffer, buffer_position pos, char byte) {
+    /* pos must have been reserved by pymongo_buffer_save_space. */
+    assert(pos >= 0 && pos < buffer->position);
     /* See struct comment for why the per-object lock is required here.
-     * pos was reserved by pymongo_buffer_save_space; no resize occurs. */
+     * No resize occurs: pos is within already-reserved space. */
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
     buffer->ptr[pos] = byte;
     Py_END_CRITICAL_SECTION();
 }
 
 void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t data) {
-    uint32_t data_le = BSON_UINT32_TO_LE(data);
+    /* pos must have been reserved by pymongo_buffer_save_space. */
+    assert(pos >= 0 && pos + 4 <= buffer->position);
     /* See struct comment for why the per-object lock is required here. */
+    uint32_t data_le = BSON_UINT32_TO_LE(data);
     Py_BEGIN_CRITICAL_SECTION(buffer->bytearray);
     memcpy(buffer->ptr + pos, &data_le, 4);
     Py_END_CRITICAL_SECTION();
