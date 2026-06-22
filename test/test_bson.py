@@ -1290,6 +1290,60 @@ class TestBSON(unittest.TestCase):
         self.assertEqual(decoded["a"][1000], 1000)
         self.assertEqual(decoded["a"][1001], 1001)
 
+    def test_encode_returns_bytes(self):
+        self.assertIs(type(bson.encode({"x": 1})), bytes)
+
+    @unittest.skipUnless(bson.has_c(), "C extension not available")
+    def test_dict_to_bson_returns_bytearray(self):
+        result = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
+        self.assertIs(type(result), bytearray)  # type: ignore[comparison-overlap]
+
+    def test_encode_and_dict_to_bson_agree(self):
+        doc = {"a": 1, "b": "hello"}
+        self.assertEqual(bson.encode(doc), bytes(_dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS)))
+
+    @unittest.skipUnless(bson.has_c(), "C extension not available")
+    def test_is_valid_accepts_bytearray(self):
+        ba = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
+        self.assertIsInstance(ba, bytearray)
+        self.assertTrue(bson.is_valid(ba))
+
+    @unittest.skipUnless(bson.has_c(), "C extension not available")
+    def test_concurrent_dict_to_bson(self):
+        # Call _dict_to_bson directly so each thread exercises the C buffer
+        # without the bytes() wrapper in bson.encode().
+        doc = {"k": "v" * 100, "nested": {"a": list(range(50))}}
+        expected = bytes(_dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS))
+        errors: list[bytearray] = []
+
+        def encode_and_check():
+            for _ in range(500):
+                result = _dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS)
+                if result != expected:
+                    errors.append(result)
+
+        threads = [threading.Thread(target=encode_and_check) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertFalse(errors, f"Got {len(errors)} corrupt result(s)")
+
+    @unittest.skipIf(sys.implementation.name == "pypy", "tracemalloc is not available on PyPy")
+    def test_encode_failure_no_leak(self):
+        import tracemalloc as tm
+
+        tm.start()
+        for _ in range(1000):
+            with self.assertRaises(Exception):  # noqa: B017
+                bson.encode({1: "non-string key"})  # type: ignore[arg-type,dict-item]
+        _, peak = tm.get_traced_memory()
+        tm.stop()
+        # Each failed encode allocates and immediately frees a small buffer,
+        # so legitimate peak usage is a few KB. 100 KiB is a generous ceiling
+        # that will still catch any buffer that leaks on the error path.
+        self.assertLess(peak, 100 * 1024, f"peak memory {peak} bytes exceeds 100 KiB")
+
 
 class TestCodecOptions(unittest.TestCase):
     def test_document_class(self):
@@ -1804,64 +1858,6 @@ class TestLongLongToString(unittest.TestCase):
             _cbson._test_long_long_to_str()
         except ImportError:
             print("_cbson was not imported. Check compilation logs.")
-
-
-class TestPyByteArrayBuffer(unittest.TestCase):
-    """Regression tests for PYTHON-3449: buffer.c rewritten in terms of PyByteArray."""
-
-    @unittest.skipUnless(bson.has_c(), "C extension not available")
-    def test_concurrent_dict_to_bson(self):
-        # Call _dict_to_bson directly so each thread exercises the C buffer
-        # without the bytes() wrapper in bson.encode().
-        doc = {"k": "v" * 100, "nested": {"a": list(range(50))}}
-        expected = bytes(_dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS))
-        errors: list[bytearray] = []
-
-        def encode_and_check():
-            for _ in range(500):
-                result = _dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS)
-                if result != expected:
-                    errors.append(result)
-
-        threads = [threading.Thread(target=encode_and_check) for _ in range(8)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        self.assertFalse(errors, f"Got {len(errors)} corrupt result(s)")
-
-    def test_encode_returns_bytes(self):
-        self.assertIs(type(bson.encode({"x": 1})), bytes)
-
-    @unittest.skipUnless(bson.has_c(), "C extension not available")
-    def test_dict_to_bson_returns_bytearray(self):
-        result = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
-        self.assertIs(type(result), bytearray)  # type: ignore[comparison-overlap]
-
-    def test_encode_and_dict_to_bson_agree(self):
-        doc = {"a": 1, "b": "hello"}
-        self.assertEqual(bson.encode(doc), bytes(_dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS)))
-
-    @unittest.skipUnless(bson.has_c(), "C extension not available")
-    def test_is_valid_accepts_bytearray(self):
-        ba = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
-        self.assertIsInstance(ba, bytearray)
-        self.assertTrue(bson.is_valid(ba))
-
-    @unittest.skipIf(sys.implementation.name == "pypy", "tracemalloc is not available on PyPy")
-    def test_encode_failure_no_leak(self):
-        import tracemalloc as tm
-
-        tm.start()
-        for _ in range(1000):
-            with self.assertRaises(Exception):  # noqa: B017
-                bson.encode({1: "non-string key"})  # type: ignore[arg-type,dict-item]
-        _, peak = tm.get_traced_memory()
-        tm.stop()
-        # Each failed encode allocates and immediately frees a small buffer,
-        # so legitimate peak usage is a few KB. 100 KiB is a generous ceiling
-        # that will still catch any buffer that leaks on the error path.
-        self.assertLess(peak, 100 * 1024, f"peak memory {peak} bytes exceeds 100 KiB")
 
 
 if __name__ == "__main__":
