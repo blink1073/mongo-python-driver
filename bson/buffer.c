@@ -32,22 +32,22 @@
 
 #define INITIAL_BUFFER_SIZE 256
 
-/* buffer_t is backed by a PyByteArray. The buffer_t struct is the sole owner
- * of the bytearray (refcount == 1) from pymongo_buffer_new until
- * pymongo_buffer_finish or pymongo_buffer_free. This single-owner invariant
- * means no other Python thread can hold a reference, so Py_BEGIN_CRITICAL_SECTION
- * calls below are always uncontended but are required for correctness when the
+/* buffer_t is backed by a PyByteArray. The bytearray's reference count is
+ * always 1 from pymongo_buffer_new until pymongo_buffer_finish or
+ * pymongo_buffer_free — nothing outside this struct holds a reference to it.
+ * Because nothing else references it, Py_BEGIN_CRITICAL_SECTION calls below
+ * are always uncontended, but they are required for correctness when the
  * module runs without the GIL (Py_MOD_GIL_NOT_USED).
  *
  * ptr and capacity mirror PyByteArray_AS_STRING / PyByteArray_GET_SIZE and are
  * updated after every resize. Caching them avoids an extra pointer dereference
  * through the PyObject header on every write, recovering the hot-path cost to
- * parity with the old malloc-backed implementation. ptr is valid to use
- * inside a critical section because no other thread can hold a reference to the
- * bytearray (sole-owner invariant), so nothing external can trigger a resize
- * between our capacity check and our write. */
+ * parity with the old malloc-backed implementation. ptr is safe to use inside
+ * a critical section because nothing else holds a reference to the bytearray,
+ * so no external code can trigger a resize between our capacity check and our
+ * write. */
 struct buffer {
-    PyObject* bytearray;  /* sole owner (refcount==1) from new until finish/free */
+    PyObject* bytearray;  /* refcount==1 from new until finish/free */
     char* ptr;            /* PyByteArray_AS_STRING(bytearray); updated after every resize */
     int capacity;         /* logical size of bytearray; updated after every resize */
     int position;
