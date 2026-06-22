@@ -111,8 +111,9 @@ static int buffer_grow(buffer_t buffer, int min_length) {
         old_size = size;
         size *= 2;
         if (size <= old_size) {
-            /* Overflow or size < 1: fall back to exact size. */
-            size = min_length;
+           /* Size did not increase. Could be an overflow
+            * or size < 1. Just go with min_length. */
+           size = min_length;
         }
     }
 
