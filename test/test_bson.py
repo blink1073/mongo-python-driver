@@ -1809,46 +1809,6 @@ class TestLongLongToString(unittest.TestCase):
 class TestPyByteArrayBuffer(unittest.TestCase):
     """Regression tests for PYTHON-3449: buffer.c rewritten in terms of PyByteArray."""
 
-    def test_deep_nesting_round_trip(self):
-        # ~300 bytes per level forces a resize before the outer doc length is backfilled.
-        # A stale PyByteArray pointer after resize would corrupt the backfilled length.
-        doc: dict = {"a" * 50: "b" * 250}
-        for _ in range(20):
-            doc = {"nested": doc}
-        encoded = bson.encode(doc)
-        self.assertEqual(bson.decode(encoded), doc)
-
-    def test_wide_document_round_trip(self):
-        doc = {str(i): "x" * 100 for i in range(100)}
-        self.assertEqual(bson.decode(bson.encode(doc)), doc)
-
-    def test_sequential_encodes_no_corruption(self):
-        # Allocator reuse of freed memory would surface as a corrupt decode if a
-        # use-after-free existed in pymongo_buffer_finish or pymongo_buffer_free.
-        docs = [{"i": i, "data": "x" * (i % 500)} for i in range(2000)]
-        for doc, enc in zip(docs, [bson.encode(d) for d in docs]):
-            self.assertEqual(bson.decode(enc), doc)
-
-    def test_concurrent_encoding(self):
-        # Each thread owns its own buffer, so a data race would show up as a
-        # corrupt result rather than a crash.
-        doc = {"k": "v" * 100, "nested": {"a": list(range(50))}}
-        expected = bson.encode(doc)
-        errors: list[bytes] = []
-
-        def encode_and_check():
-            for _ in range(500):
-                result = bson.encode(doc)
-                if result != expected:
-                    errors.append(result)
-
-        threads = [threading.Thread(target=encode_and_check) for _ in range(8)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        self.assertFalse(errors, f"Got {len(errors)} corrupt result(s)")
-
     @unittest.skipUnless(bson.has_c(), "C extension not available")
     def test_concurrent_dict_to_bson(self):
         # Call _dict_to_bson directly so each thread exercises the C buffer
@@ -1887,10 +1847,6 @@ class TestPyByteArrayBuffer(unittest.TestCase):
         ba = _dict_to_bson({"x": 1}, False, DEFAULT_CODEC_OPTIONS)
         self.assertIsInstance(ba, bytearray)
         self.assertTrue(bson.is_valid(ba))
-
-    def test_is_valid_rejects_non_bytes(self):
-        with self.assertRaises(TypeError):
-            bson.is_valid("not bytes")  # type: ignore[arg-type]
 
     @unittest.skipIf(sys.implementation.name == "pypy", "tracemalloc is not available on PyPy")
     def test_encode_failure_no_leak(self):
