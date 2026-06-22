@@ -609,8 +609,7 @@ int buffer_write_int64(buffer_t buffer, int64_t data) {
 void buffer_write_int32_at_position(buffer_t buffer,
                                     int position,
                                     int32_t data) {
-    uint32_t data_le = BSON_UINT32_TO_LE(data);
-    memcpy(pymongo_buffer_get_buffer(buffer) + position, &data_le, 4);
+    pymongo_buffer_write_int32_at(buffer, position, data);
 }
 
 static int write_unicode(buffer_t buffer, PyObject* py_string) {
@@ -1089,7 +1088,7 @@ static int _write_regex_to_buffer(
     if (!buffer_write_bytes(buffer, flags, flags_length)) {
         return 0;
     }
-    *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x0B;
+    pymongo_buffer_write_byte_at(buffer, type_byte, 0x0B);
     return 1;
 }
 
@@ -1138,7 +1137,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             const char* data;
             int size;
 
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x05;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x05);
             subtype_object = PyObject_GetAttr(value, state->_subtype_str);
             if (!subtype_object) {
                 return 0;
@@ -1201,7 +1200,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
                 return 0;
             }
             Py_DECREF(pystring);
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x07;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x07);
             return 1;
         }
     case 9:
@@ -1211,7 +1210,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             if (!millis_from_datetime_ms(value, &millis)) {
                 return 0;
             }
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x09;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x09);
             return buffer_write_int64(buffer, (int64_t)millis);
         }
     case 11:
@@ -1233,11 +1232,11 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
 
             if (scope == Py_None) {
                 Py_DECREF(scope);
-                *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x0D;
+                pymongo_buffer_write_byte_at(buffer, type_byte, 0x0D);
                 return write_string(buffer, value);
             }
 
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x0F;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x0F);
 
             start_position = pymongo_buffer_get_position(buffer);
             /* save space for length */
@@ -1295,7 +1294,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
                 return 0;
             }
 
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x11;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x11);
             return 1;
         }
     case 18:
@@ -1310,7 +1309,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             if (!buffer_write_int64(buffer, (int64_t)ll)) {
                 return 0;
             }
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x12;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x12);
             return 1;
         }
     case 19:
@@ -1331,7 +1330,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
                 return 0;
             }
             Py_DECREF(pystring);
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x13;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x13);
             return 1;
         }
     case 100:
@@ -1348,7 +1347,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
                 return 0;
             }
             Py_DECREF(as_doc);
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x03);
             return 1;
         }
     case 101:
@@ -1357,19 +1356,19 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             if (!write_raw_doc(buffer, value, state->_raw_str)) {
                 return 0;
             }
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x03);
             return 1;
         }
     case 255:
         {
             /* MinKey */
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0xFF;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0xFF);
             return 1;
         }
     case 127:
         {
             /* MaxKey */
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x7F;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x7F);
             return 1;
         }
     }
@@ -1378,7 +1377,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
 
     if (PyBool_Check(value)) {
         const char c = (value == Py_True) ? 0x01 : 0x00;
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x08;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x08);
         return buffer_write_bytes(buffer, &c, 1);
     }
     else if (PyLong_Check(value)) {
@@ -1387,21 +1386,21 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             /* Ignore error and give the fallback_encoder a chance. */
             PyErr_Clear();
         } else if (-2147483648LL <= long_long_value && long_long_value <= 2147483647LL) {
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x10;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x10);
             return buffer_write_int32(buffer, (int32_t)long_long_value);
         } else {
-            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x12;
+            pymongo_buffer_write_byte_at(buffer, type_byte, 0x12);
             return buffer_write_int64(buffer, (int64_t)long_long_value);
         }
     } else if (PyFloat_Check(value)) {
         const double d = PyFloat_AsDouble(value);
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x01;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x01);
         return buffer_write_double(buffer, d);
     } else if (value == Py_None) {
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x0A;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x0A);
         return 1;
     } else if (PyDict_Check(value)) {
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x03);
         return write_dict(self, buffer, value, check_keys, options, 0);
     } else if ((is_list = PyList_Check(value)) || PyTuple_Check(value)) {
         Py_ssize_t items, i;
@@ -1410,7 +1409,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             length;
         char zero = 0;
 
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x04;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x04);
         start_position = pymongo_buffer_get_position(buffer);
 
         /* save space for length */
@@ -1479,7 +1478,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             return 0;
         if ((size = _downcast_and_check(PyBytes_GET_SIZE(value), 0)) == -1)
             return 0;
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x05;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x05);
         if (!buffer_write_int32(buffer, (int32_t)size)) {
             return 0;
         }
@@ -1491,7 +1490,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
         }
         return 1;
     } else if (PyUnicode_Check(value)) {
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x02;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x02);
         return write_unicode(buffer, value);
     } else if (PyDateTime_Check(value)) {
         long long millis;
@@ -1512,7 +1511,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             millis = millis_from_datetime(value);
         }
         Py_DECREF(utcoffset);
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x09;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x09);
         return buffer_write_int64(buffer, (int64_t)millis);
     } else if (PyObject_TypeCheck(value, state->REType)) {
         return _write_regex_to_buffer(buffer, type_byte, value, state->_flags_str, state->_pattern_str);
@@ -1521,7 +1520,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
         if (PyErr_Occurred()) {
             return 0;
         }
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
+        pymongo_buffer_write_byte_at(buffer, type_byte, 0x03);
         return write_dict(self, buffer, value, check_keys, options, 0);
     } else if (PyObject_IsInstance(value, state->UUID)) {
         PyObject* binary_value = NULL;
@@ -2046,11 +2045,8 @@ static PyObject* _cbson_dict_to_bson(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    /* objectify buffer */
-    result = Py_BuildValue("y#", pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer));
     destroy_codec_options(&options);
-    pymongo_buffer_free(buffer);
+    result = pymongo_buffer_finish(buffer);
     return result;
 }
 
@@ -3200,7 +3196,7 @@ static PyObject* _cbson_array_of_documents_to_buffer(PyObject* self, PyObject* a
     if (pymongo_buffer_save_space(buffer, size) == -1) {
         goto fail;
     }
-    pymongo_buffer_update_position(buffer, 0);
+    pymongo_buffer_rollback(buffer, 0);
 
     position += 4;
     while (position < size - 1) {
@@ -3254,15 +3250,15 @@ static PyObject* _cbson_array_of_documents_to_buffer(PyObject* self, PyObject* a
         goto fail;
     }
 
-    /* objectify buffer */
-    result = Py_BuildValue("y#", pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer));
+    result = pymongo_buffer_finish(buffer);
+    buffer = NULL;
     goto done;
 fail:
     result = NULL;
+    pymongo_buffer_free(buffer);
+    buffer = NULL;
 done:
     PyBuffer_Release(&view);
-    pymongo_buffer_free(buffer);
     return result;
 }
 

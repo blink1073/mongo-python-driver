@@ -141,10 +141,13 @@ static PyObject* _cbson_query_message(PyObject* self, PyObject* args) {
         buffer, length_location, (int32_t)message_length);
 
     /* objectify buffer */
-    result = Py_BuildValue("iy#i", request_id,
-                           pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer),
-                           max_size);
+    {
+        PyObject* msg = pymongo_buffer_finish(buffer);
+        buffer = NULL;
+        if (msg) {
+            result = Py_BuildValue("iNi", request_id, msg, max_size);
+        }
+    }
 fail:
     PyMem_Free(collection_name);
     destroy_codec_options(&options);
@@ -201,9 +204,13 @@ static PyObject* _cbson_get_more_message(PyObject* self, PyObject* args) {
         buffer, length_location, (int32_t)message_length);
 
     /* objectify buffer */
-    result = Py_BuildValue("iy#", request_id,
-                           pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer));
+    {
+        PyObject* msg = pymongo_buffer_finish(buffer);
+        buffer = NULL;
+        if (msg) {
+            result = Py_BuildValue("iN", request_id, msg);
+        }
+    }
 fail:
     PyMem_Free(collection_name);
     if (buffer) {
@@ -318,11 +325,13 @@ static PyObject* _cbson_op_msg(PyObject* self, PyObject* args) {
         buffer, length_location, (int32_t)message_length);
 
     /* objectify buffer */
-    result = Py_BuildValue("iy#ii", request_id,
-                           pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer),
-                           total_size,
-                           max_doc_size);
+    {
+        PyObject* msg = pymongo_buffer_finish(buffer);
+        buffer = NULL;
+        if (msg) {
+            result = Py_BuildValue("iNii", request_id, msg, total_size, max_doc_size);
+        }
+    }
 fail:
     Py_XDECREF(iterator);
     if (buffer) {
@@ -500,7 +509,7 @@ _batched_op_msg(
              * Roll the existing buffer back to the beginning
              * of the last document encoded.
              */
-            pymongo_buffer_update_position(buffer, cur_doc_begin);
+            pymongo_buffer_rollback(buffer, cur_doc_begin);
             Py_CLEAR(doc);
             break;
         }
@@ -575,10 +584,13 @@ _cbson_encode_batched_op_msg(PyObject* self, PyObject* args) {
         goto fail;
     }
 
-    result = Py_BuildValue("y#O",
-                           pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer),
-                           to_publish);
+    {
+        PyObject* msg = pymongo_buffer_finish(buffer);
+        buffer = NULL;
+        if (msg) {
+            result = Py_BuildValue("NO", msg, to_publish);
+        }
+    }
 fail:
     destroy_codec_options(&options);
     pymongo_buffer_free(buffer);
@@ -646,10 +658,13 @@ _cbson_batched_op_msg(PyObject* self, PyObject* args) {
     position = pymongo_buffer_get_position(buffer);
     buffer_write_int32_at_position(buffer, 0, (int32_t)position);
     buffer_write_int32_at_position(buffer, 4, (int32_t)request_id);
-    result = Py_BuildValue("iy#O", request_id,
-                           pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer),
-                           to_publish);
+    {
+        PyObject* msg = pymongo_buffer_finish(buffer);
+        buffer = NULL;
+        if (msg) {
+            result = Py_BuildValue("iNO", request_id, msg, to_publish);
+        }
+    }
 fail:
     destroy_codec_options(&options);
     pymongo_buffer_free(buffer);
@@ -729,7 +744,7 @@ _batched_write_command(
     }
 
     /* Write type byte for array */
-    *(pymongo_buffer_get_buffer(buffer) + (pymongo_buffer_get_position(buffer) - 1)) = 0x4;
+    pymongo_buffer_write_byte_at(buffer, pymongo_buffer_get_position(buffer) - 1, 0x4);
 
     switch (op) {
     case _INSERT:
@@ -826,7 +841,7 @@ _batched_write_command(
              * Roll the existing buffer back to the beginning
              * of the last document encoded.
              */
-            pymongo_buffer_update_position(buffer, sub_doc_begin);
+            pymongo_buffer_rollback(buffer, sub_doc_begin);
             Py_CLEAR(doc);
             break;
         }
@@ -910,10 +925,13 @@ _cbson_encode_batched_write_command(PyObject* self, PyObject* args) {
         goto fail;
     }
 
-    result = Py_BuildValue("y#O",
-                           pymongo_buffer_get_buffer(buffer),
-                           (Py_ssize_t)pymongo_buffer_get_position(buffer),
-                           to_publish);
+    {
+        PyObject* msg = pymongo_buffer_finish(buffer);
+        buffer = NULL;
+        if (msg) {
+            result = Py_BuildValue("NO", msg, to_publish);
+        }
+    }
 fail:
     PyMem_Free(ns);
     destroy_codec_options(&options);

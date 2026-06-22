@@ -1045,7 +1045,7 @@ def encode(
     if not isinstance(codec_options, CodecOptions):
         raise _CODEC_OPTIONS_TYPE_ERROR
 
-    return _dict_to_bson(document, check_keys, codec_options)
+    return bytes(_dict_to_bson(document, check_keys, codec_options))
 
 
 @overload
@@ -1214,7 +1214,10 @@ def _array_of_documents_to_buffer(data: Union[memoryview, bytes]) -> bytes:
 
 
 if _USE_C:
-    _array_of_documents_to_buffer = _cbson._array_of_documents_to_buffer
+    _cbson_array_of_documents_to_buffer = _cbson._array_of_documents_to_buffer
+
+    def _array_of_documents_to_buffer(data: Union[memoryview, bytes]) -> bytes:
+        return bytes(_cbson_array_of_documents_to_buffer(data))
 
 
 def _convert_raw_document_lists_to_streams(document: Any) -> None:
@@ -1376,7 +1379,7 @@ def is_valid(bson: bytes) -> bool:
 
     :param bson: the data to be validated
     """
-    if not isinstance(bson, bytes):
+    if not isinstance(bson, (bytes, bytearray)):
         raise TypeError(f"BSON data must be an instance of a subclass of bytes, not {type(bson)}")
 
     try:

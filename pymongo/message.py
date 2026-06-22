@@ -60,6 +60,10 @@ from pymongo.errors import (
 )
 from pymongo.read_preferences import ReadPreference, _ServerMode
 
+# Wire-protocol message bytes. The C extension returns bytearray (zero-copy);
+# the pure-Python path returns bytes. All consumers accept either.
+_MsgBytes = Union[bytes, bytearray]
+
 if TYPE_CHECKING:
     from pymongo.compression_support import SnappyContext, ZlibContext, ZstdContext
     from pymongo.read_concern import ReadConcern
@@ -277,7 +281,7 @@ _COMPRESSION_HEADER_SIZE = 25
 
 
 def _compress(
-    operation: int, data: bytes, ctx: Union[SnappyContext, ZlibContext, ZstdContext]
+    operation: int, data: _MsgBytes, ctx: Union[SnappyContext, ZlibContext, ZstdContext]
 ) -> tuple[int, bytes]:
     """Takes message data, compresses it, and adds an OP_COMPRESSED header."""
     compressed = ctx.compress(data)
@@ -365,7 +369,7 @@ def _op_msg_uncompressed(
     identifier: str,
     docs: Optional[list[Mapping[str, Any]]],
     opts: CodecOptions[Any],
-) -> tuple[int, bytes, int, int]:
+) -> tuple[int, _MsgBytes, int, int]:
     """Internal compressed OP_MSG message helper."""
     data, total_size, max_bson_size = _op_msg_no_header(flags, command, identifier, docs, opts)
     request_id, op_message = __pack_message(2013, data)
@@ -383,7 +387,7 @@ def _op_msg(
     read_preference: Optional[_ServerMode],
     opts: CodecOptions[Any],
     ctx: Union[SnappyContext, ZlibContext, ZstdContext, None] = None,
-) -> tuple[int, bytes, int, int]:
+) -> tuple[int, _MsgBytes, int, int]:
     """Get a OP_MSG message."""
     command["$db"] = dbname
     # getMore commands do not send $readPreference.
@@ -435,7 +439,7 @@ def _get_more_compressed(
 
 def _get_more_uncompressed(
     collection_name: str, num_to_return: int, cursor_id: int
-) -> tuple[int, bytes]:
+) -> tuple[int, _MsgBytes]:
     """Internal getMore message helper."""
     return __pack_message(2005, _get_more_impl(collection_name, num_to_return, cursor_id))
 
@@ -449,7 +453,7 @@ def _get_more(
     num_to_return: int,
     cursor_id: int,
     ctx: Union[SnappyContext, ZlibContext, ZstdContext, None] = None,
-) -> tuple[int, bytes]:
+) -> tuple[int, _MsgBytes]:
     """Get a **getMore** message."""
     if ctx:
         return _get_more_compressed(collection_name, num_to_return, cursor_id, ctx)
@@ -589,7 +593,7 @@ class _BulkWriteContext(_BulkWriteContextBase):
 
     def batch_command(
         self, cmd: MutableMapping[str, Any], docs: list[Mapping[str, Any]]
-    ) -> tuple[int, Union[bytes, dict[str, Any]], list[Mapping[str, Any]]]:
+    ) -> tuple[int, Union[_MsgBytes, dict[str, Any]], list[Mapping[str, Any]]]:
         namespace = self.db_name + ".$cmd"
         request_id, msg, to_send = _do_batched_op_msg(
             namespace, self.op_type, cmd, docs, self.codec, self
@@ -734,7 +738,7 @@ def _encode_batched_op_msg(
     ack: bool,
     opts: CodecOptions[Any],
     ctx: _BulkWriteContext,
-) -> tuple[bytes, list[Mapping[str, Any]]]:
+) -> tuple[_MsgBytes, list[Mapping[str, Any]]]:
     """Encode the next batched insert, update, or delete operation
     as OP_MSG.
     """
@@ -755,7 +759,7 @@ def _batched_op_msg_compressed(
     ack: bool,
     opts: CodecOptions[Any],
     ctx: _BulkWriteContext,
-) -> tuple[int, bytes, list[Mapping[str, Any]]]:
+) -> tuple[int, _MsgBytes, list[Mapping[str, Any]]]:
     """Create the next batched insert, update, or delete operation
     with OP_MSG, compressed.
     """
@@ -773,7 +777,7 @@ def _batched_op_msg(
     ack: bool,
     opts: CodecOptions[Any],
     ctx: _BulkWriteContext,
-) -> tuple[int, bytes, list[Mapping[str, Any]]]:
+) -> tuple[int, _MsgBytes, list[Mapping[str, Any]]]:
     """OP_MSG implementation entry point."""
     buf = _BytesIO()
 
@@ -805,7 +809,7 @@ def _do_batched_op_msg(
     docs: list[Mapping[str, Any]],
     opts: CodecOptions[Any],
     ctx: _BulkWriteContext,
-) -> tuple[int, bytes, list[Mapping[str, Any]]]:
+) -> tuple[int, _MsgBytes, list[Mapping[str, Any]]]:
     """Create the next batched insert, update, or delete operation
     using OP_MSG.
     """
@@ -1145,7 +1149,7 @@ def _encode_batched_write_command(
     docs: list[Mapping[str, Any]],
     opts: CodecOptions[Any],
     ctx: _BulkWriteContext,
-) -> tuple[bytes, list[Mapping[str, Any]]]:
+) -> tuple[_MsgBytes, list[Mapping[str, Any]]]:
     """Encode the next batched insert, update, or delete command."""
     buf = _BytesIO()
 
@@ -1451,7 +1455,7 @@ class _Query:
 
     def get_message(
         self, read_preference: _ServerMode, conn: _AgnosticConnection, use_cmd: bool = False
-    ) -> tuple[int, bytes, int]:
+    ) -> tuple[int, _MsgBytes, int]:
         """Get a query message"""
         # Use the read_preference decided by _socket_from_server.
         self.read_preference = read_preference
@@ -1566,7 +1570,7 @@ class _GetMore:
 
     def get_message(
         self, dummy0: Any, conn: _AgnosticConnection, use_cmd: bool = False
-    ) -> Union[tuple[int, bytes, int], tuple[int, bytes]]:
+    ) -> Union[tuple[int, _MsgBytes, int], tuple[int, _MsgBytes]]:
         """Get a getmore message."""
         ns = self.namespace()
         ctx = conn.compression_context
