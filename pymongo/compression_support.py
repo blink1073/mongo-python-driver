@@ -133,7 +133,7 @@ class SnappyContext:
     compressor_id = 1
 
     @staticmethod
-    def compress(data: bytes) -> bytes:
+    def compress(data: bytes | bytearray) -> bytes:
         import snappy
 
         return snappy.compress(data)
@@ -145,7 +145,7 @@ class ZlibContext:
     def __init__(self, level: int):
         self.level = level
 
-    def compress(self, data: bytes) -> bytes:
+    def compress(self, data: bytes | bytearray) -> bytes:
         import zlib
 
         return zlib.compress(data, self.level)
@@ -155,7 +155,7 @@ class ZstdContext:
     compressor_id = 3
 
     @staticmethod
-    def compress(data: bytes) -> bytes:
+    def compress(data: bytes | bytearray) -> bytes:
         if sys.version_info >= (3, 14):
             from compression import zstd
         else:

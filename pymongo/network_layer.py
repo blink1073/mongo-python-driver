@@ -236,7 +236,7 @@ else:
         return mv
 
 
-def sendall(sock: Union[socket.socket, _sslConn], buf: bytes) -> None:
+def sendall(sock: Union[socket.socket, _sslConn], buf: bytes | bytearray) -> None:
     sock.sendall(buf)
 
 
@@ -514,7 +514,7 @@ class PyMongoProtocol(BufferedProtocol):
         self.transport = transport  # type: ignore[assignment]
         self.transport.set_write_buffer_limits(MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE)
 
-    async def write(self, message: bytes) -> None:
+    async def write(self, message: bytes | bytearray) -> None:
         """Write a message to this connection's transport."""
         if self.transport.is_closing():
             raise OSError("Connection is closed")
@@ -687,7 +687,7 @@ class PyMongoProtocol(BufferedProtocol):
         await self._closed
 
 
-async def async_sendall(conn: PyMongoProtocol, buf: bytes) -> None:
+async def async_sendall(conn: PyMongoProtocol, buf: bytes | bytearray) -> None:
     try:
         await asyncio.wait_for(conn.write(buf), timeout=conn.gettimeout)
     except asyncio.TimeoutError as exc:

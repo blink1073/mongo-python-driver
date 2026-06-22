@@ -423,7 +423,7 @@ class AsyncConnection:
         except BaseException as error:
             await self._raise_connection_failure(error)
 
-    async def send_message(self, message: bytes, max_doc_size: int) -> None:
+    async def send_message(self, message: bytes | bytearray, max_doc_size: int) -> None:
         """Send a raw BSON message or raise ConnectionFailure.
 
         If a network exception is raised, the socket is closed.
@@ -459,7 +459,7 @@ class AsyncConnection:
             # Write won't succeed, bail as if we'd received a not primary error.
             raise NotPrimaryError("not primary", {"ok": 0, "errmsg": "not primary", "code": 10107})
 
-    async def unack_write(self, msg: bytes, max_doc_size: int) -> None:
+    async def unack_write(self, msg: bytes | bytearray, max_doc_size: int) -> None:
         """Send unack OP_MSG.
 
         Can raise ConnectionFailure or InvalidDocument.
@@ -471,7 +471,10 @@ class AsyncConnection:
         await self.send_message(msg, max_doc_size)
 
     async def write_command(
-        self, request_id: int, msg: bytes, codec_options: CodecOptions[Mapping[str, Any]]
+        self,
+        request_id: int,
+        msg: bytes | bytearray,
+        codec_options: CodecOptions[Mapping[str, Any]],
     ) -> dict[str, Any]:
         """Send "insert" etc. command, returning response as a dict.
 

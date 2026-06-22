@@ -167,7 +167,7 @@ class _sslConn(_SSL.Connection):
                 return 0
             raise
 
-    def sendall(self, buf: bytes, flags: int = 0) -> None:  # type: ignore[override]
+    def sendall(self, buf: bytes | bytearray, flags: int = 0) -> None:  # type: ignore[override]
         view = memoryview(buf)
         total_length = len(buf)
         total_sent = 0
