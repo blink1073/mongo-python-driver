@@ -1849,6 +1849,27 @@ class TestPyByteArrayBuffer(unittest.TestCase):
             t.join()
         self.assertFalse(errors, f"Got {len(errors)} corrupt result(s)")
 
+    @unittest.skipUnless(bson.has_c(), "C extension not available")
+    def test_concurrent_dict_to_bson(self):
+        # Call _dict_to_bson directly so each thread exercises the C buffer
+        # without the bytes() wrapper in bson.encode().
+        doc = {"k": "v" * 100, "nested": {"a": list(range(50))}}
+        expected = bytes(_dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS))
+        errors: list[bytearray] = []
+
+        def encode_and_check():
+            for _ in range(500):
+                result = _dict_to_bson(doc, False, DEFAULT_CODEC_OPTIONS)
+                if result != expected:
+                    errors.append(result)
+
+        threads = [threading.Thread(target=encode_and_check) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertFalse(errors, f"Got {len(errors)} corrupt result(s)")
+
     def test_encode_returns_bytes(self):
         self.assertIs(type(bson.encode({"x": 1})), bytes)
 
