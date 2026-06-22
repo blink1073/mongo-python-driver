@@ -207,6 +207,10 @@ int pymongo_buffer_get_position(buffer_t buffer) {
     return buffer->position;
 }
 
+PyObject* pymongo_buffer_get_bytearray(buffer_t buffer) {
+    return buffer->bytearray;
+}
+
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position) {
     buffer->position = new_position;
 }
