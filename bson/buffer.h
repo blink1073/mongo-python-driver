@@ -53,9 +53,15 @@ void pymongo_buffer_write_byte_at(buffer_t buffer, buffer_position pos, char byt
  * `pos` must have been reserved with pymongo_buffer_save_space; no resize occurs. */
 void pymongo_buffer_write_int32_at(buffer_t buffer, buffer_position pos, int32_t data);
 
-/* Internal accessors — not part of the public API; break the abstraction. */
+/* Return the number of bytes written so far. */
 buffer_position pymongo_buffer_get_position(buffer_t buffer);
-void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position);
+
+/* Roll the write cursor back to `position`, discarding everything written
+ * after it. It is used to undo a speculative document write when a batch
+ * overflows the max message size. `position` must have been obtained from
+ * a prior call to pymongo_buffer_get_position. */
+void pymongo_buffer_rollback(buffer_t buffer, buffer_position position);
+
 /* For debugging only; returns a borrowed reference; the buffer remains the owner. */
 PyObject* pymongo_buffer_get_bytearray(buffer_t buffer);
 

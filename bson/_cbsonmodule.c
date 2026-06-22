@@ -3196,7 +3196,7 @@ static PyObject* _cbson_array_of_documents_to_buffer(PyObject* self, PyObject* a
     if (pymongo_buffer_save_space(buffer, size) == -1) {
         goto fail;
     }
-    pymongo_buffer_update_position(buffer, 0);
+    pymongo_buffer_rollback(buffer, 0);
 
     position += 4;
     while (position < size - 1) {

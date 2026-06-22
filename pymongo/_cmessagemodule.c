@@ -500,7 +500,7 @@ _batched_op_msg(
              * Roll the existing buffer back to the beginning
              * of the last document encoded.
              */
-            pymongo_buffer_update_position(buffer, cur_doc_begin);
+            pymongo_buffer_rollback(buffer, cur_doc_begin);
             Py_CLEAR(doc);
             break;
         }
@@ -826,7 +826,7 @@ _batched_write_command(
              * Roll the existing buffer back to the beginning
              * of the last document encoded.
              */
-            pymongo_buffer_update_position(buffer, sub_doc_begin);
+            pymongo_buffer_rollback(buffer, sub_doc_begin);
             Py_CLEAR(doc);
             break;
         }
