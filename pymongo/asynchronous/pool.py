@@ -1007,9 +1007,6 @@ class Pool:
                 "Attempted to check out a connection from closed connection pool"
             )
 
-        async with self.lock:
-            self.operation_count += 1
-
         # Get a free socket or create one.
         if _csot.get_timeout():
             deadline = _csot.get_deadline()
@@ -1018,28 +1015,50 @@ class Pool:
         else:
             deadline = None
 
-        async with self.size_cond:
-            self._raise_if_not_ready(checkout_started_time, emit_event=True)
-            while not (self.requests < self.max_pool_size):
-                timeout = deadline - time.monotonic() if deadline else None
-                if not await _async_cond_wait(self.size_cond, timeout):
-                    # Timed out, notify the next thread to ensure a
-                    # timeout doesn't consume the condition.
-                    if self.requests < self.max_pool_size:
-                        self.size_cond.notify()
-                    self._raise_wait_queue_timeout(checkout_started_time)
-                self._raise_if_not_ready(checkout_started_time, emit_event=True)
-            self.requests += 1
-
-        # We've now acquired the semaphore and must release it on error.
         conn = None
-        incremented = False
+        op_count_incremented = False
+        requests_incremented = False
+        active_sockets_incremented = False
         emitted_event = False
         is_new_conn = False
+
         try:
+            slot_acquired = False
             async with self.lock:
-                self.active_sockets += 1
-                incremented = True
+                self.operation_count += 1
+                op_count_incremented = True
+                self._raise_if_not_ready(checkout_started_time, emit_event=True)
+                if self.requests < self.max_pool_size:
+                    # Fast path: a slot is immediately available, so do all
+                    # of the counter bookkeeping in this single critical
+                    # section instead of taking the lock multiple times.
+                    self.requests += 1
+                    requests_incremented = True
+                    self.active_sockets += 1
+                    active_sockets_incremented = True
+                    slot_acquired = True
+
+            if not slot_acquired:
+                # Slow path: no slot was free. Fall back to waiting on the
+                # requests semaphore, exactly as before.
+                async with self.size_cond:
+                    self._raise_if_not_ready(checkout_started_time, emit_event=True)
+                    while not (self.requests < self.max_pool_size):
+                        timeout = deadline - time.monotonic() if deadline else None
+                        if not await _async_cond_wait(self.size_cond, timeout):
+                            # Timed out, notify the next thread to ensure a
+                            # timeout doesn't consume the condition.
+                            if self.requests < self.max_pool_size:
+                                self.size_cond.notify()
+                            self._raise_wait_queue_timeout(checkout_started_time)
+                        self._raise_if_not_ready(checkout_started_time, emit_event=True)
+                    self.requests += 1
+                    requests_incremented = True
+
+                async with self.lock:
+                    self.active_sockets += 1
+                    active_sockets_incremented = True
+
             while conn is None:
                 # CMAP: we MUST wait for either maxConnecting OR for a socket
                 # to be checked back into the pool.
@@ -1084,11 +1103,16 @@ class Pool:
             if conn:
                 # We checked out a socket but authentication failed.
                 await conn.close_conn(ConnectionClosedReason.ERROR)
-            async with self.size_cond:
-                self.requests -= 1
-                if incremented:
-                    self.active_sockets -= 1
-                self.size_cond.notify()
+            if requests_incremented or active_sockets_incremented:
+                async with self.size_cond:
+                    if requests_incremented:
+                        self.requests -= 1
+                    if active_sockets_incremented:
+                        self.active_sockets -= 1
+                    self.size_cond.notify()
+            if op_count_incremented:
+                async with self.lock:
+                    self.operation_count -= 1
 
             if not emitted_event:
                 self._telemetry.checkout_failed(
