@@ -938,10 +938,12 @@ def create_mock_replica_set_topology(hosts=("a", "b", "c")):
     return t
 
 
-class TestTopologyDescriptionConcurrency(TopologyTest):
-    """apply_selector() runs under a shared read lock (PYTHON-5898), so it must
-    not mutate the TopologyDescription: concurrent callers passing different
-    deprioritized_servers would otherwise clobber each other's candidate lists.
+class TestTopologyDescriptionImmutability(TopologyTest):
+    """TopologyDescription is a shared, publicly-exposed immutable snapshot
+    (PYTHON-5898), so apply_selector() must not mutate it: caching a per-call
+    filtered candidate list on the description would leave the public
+    candidate_servers property permanently stale after any selection that
+    deprioritized servers.
     """
 
     def test_concurrent_apply_selector_with_deprioritized_servers(self):
@@ -963,7 +965,7 @@ class TestTopologyDescriptionConcurrency(TopologyTest):
         barrier = threading.Barrier(6)
 
         def deprioritizing_worker():
-            barrier.wait()
+            barrier.wait(timeout=30)
             for _ in range(iterations):
                 # A retryable write retrying away from the primary must never
                 # be handed the deprioritized primary back.
@@ -974,7 +976,7 @@ class TestTopologyDescriptionConcurrency(TopologyTest):
                     errors.append(f"deprioritized primary was selected: {sds}")
 
         def plain_worker():
-            barrier.wait()
+            barrier.wait(timeout=30)
             for _ in range(iterations):
                 # An ordinary operation must always find the healthy primary.
                 sds = description.apply_selector(Primary())
@@ -989,6 +991,33 @@ class TestTopologyDescriptionConcurrency(TopologyTest):
             thread.join()
 
         self.assertEqual([], errors[:5], f"{len(errors)} racy selections")
+
+    def test_get_primary_after_deprioritized_selection(self):
+        # Regression test for PYTHON-5898 / PYTHON-5662: apply_selector()
+        # used to cache its filtered candidate list on the (shared, publicly
+        # exposed) TopologyDescription, so candidate_servers stayed stale
+        # after any selection that deprioritized a server. get_primary()
+        # (and client.primary) build their selection from candidate_servers,
+        # so a stale, primary-less candidate list made
+        # writable_server_selector(...)[0] raise IndexError even though the
+        # primary was still known and healthy.
+        t = create_mock_replica_set_topology()
+        self.addCleanup(t.close)
+        description = t.description
+        primary_sd = description.server_descriptions()[("a", 27017)]
+        self.assertEqual(SERVER_TYPE.RSPrimary, primary_sd.server_type)
+
+        self.assertEqual(("a", 27017), t.get_primary())
+
+        # Simulate a retryable operation deprioritizing the primary for one
+        # selection call.
+        description.apply_selector(
+            ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
+        )
+
+        # get_primary() must still find the primary afterwards; it must not
+        # raise IndexError because of a stale, primary-less candidate list.
+        self.assertEqual(("a", 27017), t.get_primary())
 
     def test_apply_selector_does_not_mutate_description(self):
         t = create_mock_replica_set_topology()
