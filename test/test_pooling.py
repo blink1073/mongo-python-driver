@@ -33,7 +33,11 @@ from pymongo import MongoClient, message, timeout
 from pymongo.errors import AutoReconnect, ConnectionFailure, DuplicateKeyError
 from pymongo.hello import HelloCompat
 from pymongo.lock import _create_lock
-from pymongo.monitoring import _EventListeners
+from pymongo.monitoring import (
+    ConnectionCheckOutFailedEvent,
+    ConnectionCheckOutFailedReason,
+    _EventListeners,
+)
 from test.utils import flaky, get_pool, joinall
 
 sys.path[0:0] = [""]
@@ -401,21 +405,66 @@ class TestPooling(_TestPoolingBase):
 
     def test_wait_queue_timeout_does_not_leak_operation_count(self):
         # Regression test: a checkout that fails while waiting for a pool
-        # slot must not leave operation_count permanently incremented.
+        # slot must not leave operation_count, requests, or active_sockets
+        # permanently incremented, and must emit exactly one
+        # ConnectionCheckOutFailedEvent with reason TIMEOUT (not a second,
+        # bogus CONN_ERROR event from the outer except block).
         wait_queue_timeout = 1  # Seconds
-        pool = self.create_pool(max_pool_size=1, wait_queue_timeout=wait_queue_timeout)
+        listener = CMAPListener()
+        pool = self.create_pool(
+            max_pool_size=1,
+            wait_queue_timeout=wait_queue_timeout,
+            event_listeners=_EventListeners([listener]),
+        )
         self.addCleanup(pool.close)
 
         with pool.checkout():
             self.assertEqual(pool.operation_count, 1)
+            self.assertEqual(pool.requests, 1)
+            self.assertEqual(pool.active_sockets, 1)
+            listener.reset()
             with self.assertRaises(ConnectionFailure):
                 with pool.checkout():
                     pass
-            # The failed second checkout must not have left operation_count
+            # The failed second checkout must not have left any counter
             # incremented for its own (failed) attempt.
             self.assertEqual(pool.operation_count, 1)
+            self.assertEqual(pool.requests, 1)
+            self.assertEqual(pool.active_sockets, 1)
+
+            failed_events = listener.events_by_type(ConnectionCheckOutFailedEvent)
+            self.assertEqual(len(failed_events), 1, [e.reason for e in failed_events])
+            self.assertEqual(failed_events[0].reason, ConnectionCheckOutFailedReason.TIMEOUT)
 
         self.assertEqual(pool.operation_count, 0)
+        self.assertEqual(pool.requests, 0)
+        self.assertEqual(pool.active_sockets, 0)
+
+    def test_paused_pool_checkout_failure_does_not_leak_or_double_emit(self):
+        # Regression test: a checkout that fails because the pool is paused
+        # (not ready) must not leave operation_count, requests, or
+        # active_sockets permanently incremented, and must emit exactly one
+        # ConnectionCheckOutFailedEvent (not a second, bogus one from the
+        # outer except block). With no outstanding checkouts, a slot is
+        # immediately available, so this exercises the fast path's
+        # _raise_if_not_ready check.
+        listener = CMAPListener()
+        pool = self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
+        self.addCleanup(pool.close)
+
+        pool.reset()  # Pause the pool.
+        listener.reset()
+        with self.assertRaises(AutoReconnect):
+            with pool.checkout():
+                pass
+
+        self.assertEqual(pool.operation_count, 0)
+        self.assertEqual(pool.requests, 0)
+        self.assertEqual(pool.active_sockets, 0)
+
+        failed_events = listener.events_by_type(ConnectionCheckOutFailedEvent)
+        self.assertEqual(len(failed_events), 1, [e.reason for e in failed_events])
+        self.assertEqual(failed_events[0].reason, ConnectionCheckOutFailedReason.CONN_ERROR)
 
     def test_no_wait_queue_timeout(self):
         # Verify get_socket() with no wait_queue_timeout blocks forever.
