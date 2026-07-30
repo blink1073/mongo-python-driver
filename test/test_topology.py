@@ -1025,12 +1025,17 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         description = t.description
         primary_sd = description.server_descriptions()[("a", 27017)]
 
-        before = list(description.candidate_servers)
+        # A selection that deprioritizes the primary must not leave that
+        # filtering behind on the description: a later selection with nothing
+        # deprioritized has to see the primary again.
+        before = list(description.known_servers)
         description.apply_selector(
             ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
         )
-        self.assertEqual(before, description.candidate_servers)
-        self.assertIn(primary_sd, description.candidate_servers)
+        self.assertEqual(before, description.known_servers)
+
+        after = description.apply_selector(ReadPreference.PRIMARY_PREFERRED)
+        self.assertIn(primary_sd, after)
 
 
 if __name__ == "__main__":

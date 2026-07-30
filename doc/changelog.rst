@@ -27,13 +27,8 @@ PyMongo 4.18 brings a number of changes including:
   buffer.
 - Fixed :func:`bson.json_util.loads` to reject ``$timestamp`` values containing
   fields other than ``t`` and ``i``.
-- Fixed :attr:`~pymongo.topology_description.TopologyDescription.candidate_servers`
-  to once again return all known servers, matching its behavior before
-  PyMongo 4.16.0. Deprioritization is now applied per server-selection call
-  instead of being cached on the (shared, immutable)
-  :class:`~pymongo.topology_description.TopologyDescription`. This fixes
-  ``client.primary`` raising ``IndexError``, and ``client.secondaries`` and
-  ``client.arbiters`` returning stale results, after a retryable operation
+- Fixed ``client.primary`` raising ``IndexError``, and ``client.secondaries``
+  and ``client.arbiters`` returning stale results, after a retryable operation
   deprioritized the primary.
 - Fixed a leak where every failed connection checkout permanently
   incremented a pool's ``operation_count``, biasing server selection among

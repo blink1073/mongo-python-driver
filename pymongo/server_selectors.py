@@ -44,12 +44,12 @@ class Selection:
 
         :param topology_description: the TopologyDescription to select from.
         :param candidate_servers: the servers eligible for selection. Defaults
-            to ``topology_description.candidate_servers``. Server selection
-            passes its own (per-call, deprioritization-filtered) list here so
-            that no state has to be cached on the TopologyDescription.
+            to all known servers. Server selection passes its own (per-call,
+            deprioritization-filtered) list here so that no state has to be
+            cached on the TopologyDescription.
         """
         if candidate_servers is None:
-            candidate_servers = topology_description.candidate_servers
+            candidate_servers = topology_description.known_servers
         primary = None
         for sd in candidate_servers:
             if sd.server_type == SERVER_TYPE.RSPrimary:

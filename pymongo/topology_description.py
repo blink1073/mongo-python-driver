@@ -238,16 +238,6 @@ class TopologyDescription:
         return [s for s in self._server_descriptions.values() if s.is_readable]
 
     @property
-    def candidate_servers(self) -> list[ServerDescription]:
-        """List of Servers eligible for selection when nothing is deprioritized.
-
-        Deprioritization is per server-selection call, so it is applied by
-        :meth:`apply_selector` (via :meth:`_filter_servers`) and deliberately
-        not cached on the (immutable) TopologyDescription.
-        """
-        return self.known_servers
-
-    @property
     def common_wire_version(self) -> Optional[int]:
         """Minimum of all servers' max wire versions, or None."""
         servers = self.known_servers
