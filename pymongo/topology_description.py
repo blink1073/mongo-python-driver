@@ -280,11 +280,11 @@ class TopologyDescription:
         If every known server is deprioritized, all known servers are returned
         so that selection can still make progress.
 
-        This method must not mutate ``self``: TopologyDescription is a shared,
-        publicly-exposed immutable snapshot, and deprioritization is specific
-        to a single selection call. Caching the filtered list on ``self``
-        would leave the public :attr:`candidate_servers` property stale after
-        any selection that deprioritized servers, which is what used to make
+        This method must not mutate ``self``: a TopologyDescription is shared
+        by every concurrent selection call and is replaced, not edited, when
+        the topology changes. Deprioritization is specific to a single call,
+        so caching the filtered list on ``self`` outlived the call that
+        produced it, which is what used to make
         :meth:`~pymongo.synchronous.topology.Topology.get_primary` (and
         ``client.primary``) raise ``IndexError`` after a retryable operation
         deprioritized the primary.

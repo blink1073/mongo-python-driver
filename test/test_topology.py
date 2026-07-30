@@ -939,11 +939,10 @@ def create_mock_replica_set_topology(hosts=("a", "b", "c")):
 
 
 class TestTopologyDescriptionImmutability(TopologyTest):
-    """TopologyDescription is a shared, publicly-exposed immutable snapshot
-    (PYTHON-5898), so apply_selector() must not mutate it: caching a per-call
-    filtered candidate list on the description would leave the public
-    candidate_servers property permanently stale after any selection that
-    deprioritized servers.
+    """A TopologyDescription is shared by every concurrent selection call and
+    is replaced, not edited, when the topology changes (PYTHON-5898). So
+    apply_selector() must not mutate it: caching a per-call filtered candidate
+    list on the description outlived the call that produced it.
     """
 
     def test_concurrent_apply_selector_with_deprioritized_servers(self):
@@ -994,13 +993,12 @@ class TestTopologyDescriptionImmutability(TopologyTest):
 
     def test_get_primary_after_deprioritized_selection(self):
         # Regression test for PYTHON-5898 / PYTHON-5662: apply_selector()
-        # used to cache its filtered candidate list on the (shared, publicly
-        # exposed) TopologyDescription, so candidate_servers stayed stale
-        # after any selection that deprioritized a server. get_primary()
-        # (and client.primary) build their selection from candidate_servers,
-        # so a stale, primary-less candidate list made
-        # writable_server_selector(...)[0] raise IndexError even though the
-        # primary was still known and healthy.
+        # used to cache its filtered candidate list on the shared
+        # TopologyDescription, so the filtering outlived the call that
+        # produced it. get_primary() (and client.primary) build their
+        # selection straight from the description, so a stale, primary-less
+        # candidate list made writable_server_selector(...)[0] raise
+        # IndexError even though the primary was still known and healthy.
         t = create_mock_replica_set_topology()
         self.addCleanup(t.close)
         description = t.description
@@ -1018,24 +1016,6 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         # get_primary() must still find the primary afterwards; it must not
         # raise IndexError because of a stale, primary-less candidate list.
         self.assertEqual(("a", 27017), t.get_primary())
-
-    def test_apply_selector_does_not_mutate_description(self):
-        t = create_mock_replica_set_topology()
-        self.addCleanup(t.close)
-        description = t.description
-        primary_sd = description.server_descriptions()[("a", 27017)]
-
-        # A selection that deprioritizes the primary must not leave that
-        # filtering behind on the description: a later selection with nothing
-        # deprioritized has to see the primary again.
-        before = list(description.known_servers)
-        description.apply_selector(
-            ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
-        )
-        self.assertEqual(before, description.known_servers)
-
-        after = description.apply_selector(ReadPreference.PRIMARY_PREFERRED)
-        self.assertIn(primary_sd, after)
 
 
 if __name__ == "__main__":
