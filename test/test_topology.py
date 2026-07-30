@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 from pymongo.operations import _Op
 
@@ -905,6 +906,102 @@ class TestServerSelectionErrors(TopologyTest):
         got_hello(t, ("a", 27017), {"ok": 1})
         got_hello(t, ("b", 27017), {"ok": 1})
         self.assertMessage("No mongoses available", t)
+
+
+def create_mock_replica_set_topology(hosts=("a", "b", "c")):
+    """A ReplicaSetWithPrimary topology: hosts[0] is primary, the rest secondary."""
+    t = create_mock_topology(seeds=list(hosts), replica_set_name="rs")
+    got_hello(
+        t,
+        (hosts[0], 27017),
+        {
+            "ok": 1,
+            HelloCompat.LEGACY_CMD: True,
+            "setName": "rs",
+            "hosts": list(hosts),
+            "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
+        },
+    )
+    for host in hosts[1:]:
+        got_hello(
+            t,
+            (host, 27017),
+            {
+                "ok": 1,
+                HelloCompat.LEGACY_CMD: False,
+                "secondary": True,
+                "setName": "rs",
+                "hosts": list(hosts),
+                "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
+            },
+        )
+    return t
+
+
+class TestTopologyDescriptionConcurrency(TopologyTest):
+    """apply_selector() runs under a shared read lock (PYTHON-5898), so it must
+    not mutate the TopologyDescription: concurrent callers passing different
+    deprioritized_servers would otherwise clobber each other's candidate lists.
+    """
+
+    def test_concurrent_apply_selector_with_deprioritized_servers(self):
+        t = create_mock_replica_set_topology()
+        self.addCleanup(t.close)
+        description = t.description
+        self.assertEqual(TOPOLOGY_TYPE.ReplicaSetWithPrimary, description.topology_type)
+        primary_sd = description.server_descriptions()[("a", 27017)]
+        self.assertEqual(SERVER_TYPE.RSPrimary, primary_sd.server_type)
+
+        # Make the interpreter switch threads aggressively so a mutation race
+        # inside apply_selector() is caught reliably rather than occasionally.
+        old_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        self.addCleanup(sys.setswitchinterval, old_interval)
+
+        iterations = 500
+        errors: list[str] = []
+        barrier = threading.Barrier(6)
+
+        def deprioritizing_worker():
+            barrier.wait()
+            for _ in range(iterations):
+                # A retryable write retrying away from the primary must never
+                # be handed the deprioritized primary back.
+                sds = description.apply_selector(
+                    ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
+                )
+                if any(sd.address == primary_sd.address for sd in sds):
+                    errors.append(f"deprioritized primary was selected: {sds}")
+
+        def plain_worker():
+            barrier.wait()
+            for _ in range(iterations):
+                # An ordinary operation must always find the healthy primary.
+                sds = description.apply_selector(Primary())
+                if [sd.address for sd in sds] != [primary_sd.address]:
+                    errors.append(f"Primary() selected {sds} instead of the primary")
+
+        threads = [threading.Thread(target=deprioritizing_worker) for _ in range(3)]
+        threads += [threading.Thread(target=plain_worker) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual([], errors[:5], f"{len(errors)} racy selections")
+
+    def test_apply_selector_does_not_mutate_description(self):
+        t = create_mock_replica_set_topology()
+        self.addCleanup(t.close)
+        description = t.description
+        primary_sd = description.server_descriptions()[("a", 27017)]
+
+        before = list(description.candidate_servers)
+        description.apply_selector(
+            ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
+        )
+        self.assertEqual(before, description.candidate_servers)
+        self.assertIn(primary_sd, description.candidate_servers)
 
 
 if __name__ == "__main__":
