@@ -399,6 +399,24 @@ class TestPooling(_TestPoolingBase):
             f"Waited {duration:.2f} seconds for a socket, expected {wait_queue_timeout:f}",
         )
 
+    async def test_wait_queue_timeout_does_not_leak_operation_count(self):
+        # Regression test: a checkout that fails while waiting for a pool
+        # slot must not leave operation_count permanently incremented.
+        wait_queue_timeout = 1  # Seconds
+        pool = await self.create_pool(max_pool_size=1, wait_queue_timeout=wait_queue_timeout)
+        self.addAsyncCleanup(pool.close)
+
+        async with pool.checkout():
+            self.assertEqual(pool.operation_count, 1)
+            with self.assertRaises(ConnectionFailure):
+                async with pool.checkout():
+                    pass
+            # The failed second checkout must not have left operation_count
+            # incremented for its own (failed) attempt.
+            self.assertEqual(pool.operation_count, 1)
+
+        self.assertEqual(pool.operation_count, 0)
+
     async def test_no_wait_queue_timeout(self):
         # Verify get_socket() with no wait_queue_timeout blocks forever.
         pool = await self.create_pool(max_pool_size=1)
