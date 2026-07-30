@@ -30,6 +30,11 @@ PyMongo 4.18 brings a number of changes including:
 - Fixed ``client.primary`` raising ``IndexError``, and ``client.secondaries``
   and ``client.arbiters`` returning stale results, after a retryable operation
   deprioritized the primary.
+- Removed ``TopologyDescription.candidate_servers``, added in PyMongo 4.16.0.
+  Its value depended on which server-selection call happened to run last, so it
+  could not be relied on. Use
+  :meth:`~pymongo.topology_description.TopologyDescription.server_descriptions`
+  instead.
 - Fixed a leak where every failed connection checkout permanently
   incremented a pool's ``operation_count``, biasing server selection among
   mongoses toward the affected server.
