@@ -1013,7 +1013,11 @@ class Pool:
 
         conn = None
         op_count_incremented = False
-        slot_acquired = False
+        # Each flag is set immediately after its own increment, with no
+        # statement in between, so an interrupt cannot leave a counter
+        # incremented but unrecorded.
+        requests_incremented = False
+        active_sockets_incremented = False
         # Invariant: any site inside the `try` below that emits a checkout
         # failed event must set this so the outer handler does not re-emit.
         emitted_event = False
@@ -1031,10 +1035,11 @@ class Pool:
                     # of the counter bookkeeping in this one critical section
                     # and keep the checkout to a single lock acquisition.
                     self.requests += 1
+                    requests_incremented = True
                     self.active_sockets += 1
-                    slot_acquired = True
+                    active_sockets_incremented = True
 
-            if not slot_acquired:
+            if not requests_incremented:
                 # Slow path: no slot was free, so wait on the requests
                 # semaphore for one to be released.
                 with self.size_cond:
@@ -1054,8 +1059,9 @@ class Pool:
                         self._raise_if_not_ready(checkout_started_time, emit_event=True)
                         emitted_event = False
                     self.requests += 1
+                    requests_incremented = True
                     self.active_sockets += 1
-                    slot_acquired = True
+                    active_sockets_incremented = True
 
             while conn is None:
                 # CMAP: we MUST wait for either maxConnecting OR for a socket
@@ -1104,9 +1110,11 @@ class Pool:
             if op_count_incremented:
                 with self.size_cond:
                     self.operation_count -= 1
-                    if slot_acquired:
-                        self.requests -= 1
+                    if active_sockets_incremented:
                         self.active_sockets -= 1
+                    if requests_incremented:
+                        # Notify last, so a witer wakes to consistent counters.
+                        self.requests -= 1
                         self.size_cond.notify()
 
             if not emitted_event:
