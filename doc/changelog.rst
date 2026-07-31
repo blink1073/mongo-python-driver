@@ -33,7 +33,7 @@ PyMongo 4.18 brings a number of changes including:
 - Removed ``TopologyDescription.candidate_servers``, added in PyMongo 4.16.0.
   Its value depended on which server-selection call happened to run last, so it
   could not be relied on. Use
-  :meth:`~pymongo.topology_description.TopologyDescription.server_descriptions`
+  :attr:`~pymongo.topology_description.TopologyDescription.known_servers`
   instead.
 - Fixed a leak where every failed connection checkout permanently
   incremented a pool's ``operation_count``, biasing server selection among
