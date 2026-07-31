@@ -280,13 +280,16 @@ class TopologyDescription:
         If every known server is deprioritized, all known servers are returned
         so that selection can still make progress.
 
-        This method must not mutate ``self``. A TopologyDescription is shared
-        by every concurrent selection call and is replaced, not edited, when
-        the topology changes, while deprioritization is specific to a single
-        call. Callers such as
+        This method must not mutate ``self``. Deprioritization is specific to
+        a single call, but a TopologyDescription outlives it and is replaced,
+        not edited, when the topology changes. Filtering left behind on the
+        description would therefore leak into later readers: callers such as
         :meth:`~pymongo.synchronous.topology.Topology.get_primary` build their
-        selection straight from the description, so any filtering left on it
-        would be applied to selections that never asked for it.
+        selection straight from the description and would see a view narrowed
+        by a selection they never asked for. The same object is also handed to
+        code running on other threads -- topology event listeners and anything
+        holding :attr:`~pymongo.mongo_client.MongoClient.topology_description`
+        -- which may read it concurrently with a selection in progress.
 
         :param deprioritized_servers: servers to exclude, or None.
         """
