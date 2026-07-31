@@ -988,6 +988,9 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         for thread in threads:
             thread.join()
 
+        # Every selection must have returned its own correct result: no
+        # worker was handed a server that another worker's concurrent call
+        # had filtered out, or should have filtered out.
         self.assertEqual([], errors[:5], f"{len(errors)} racy selections")
 
     def test_get_primary_after_deprioritized_selection(self):
