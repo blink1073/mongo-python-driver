@@ -940,9 +940,8 @@ def create_mock_replica_set_topology(hosts=("a", "b", "c")):
 
 class TestTopologyDescriptionImmutability(TopologyTest):
     """A TopologyDescription is shared by every concurrent selection call and
-    is replaced, not edited, when the topology changes (PYTHON-5898). So
-    apply_selector() must not mutate it: caching a per-call filtered candidate
-    list on the description outlived the call that produced it.
+    is replaced, not edited, when the topology changes (PYTHON-5898), so
+    apply_selector() must not mutate it.
     """
 
     def test_concurrent_apply_selector_with_deprioritized_servers(self):
@@ -992,13 +991,9 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         self.assertEqual([], errors[:5], f"{len(errors)} racy selections")
 
     def test_get_primary_after_deprioritized_selection(self):
-        # Regression test for PYTHON-5898 / PYTHON-5662: apply_selector()
-        # used to cache its filtered candidate list on the shared
-        # TopologyDescription, so the filtering outlived the call that
-        # produced it. get_primary() (and client.primary) build their
-        # selection straight from the description, so a stale, primary-less
-        # candidate list made writable_server_selector(...)[0] raise
-        # IndexError even though the primary was still known and healthy.
+        # get_primary() (and client.primary) build their selection straight
+        # from the description, so a selection that deprioritizes the primary
+        # must not stop a later get_primary() from finding it.
         t = create_mock_replica_set_topology()
         self.addCleanup(t.close)
         description = t.description
@@ -1013,8 +1008,7 @@ class TestTopologyDescriptionImmutability(TopologyTest):
             ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
         )
 
-        # get_primary() must still find the primary afterwards; it must not
-        # raise IndexError because of a stale, primary-less candidate list.
+        # get_primary() must still find the primary afterwards.
         self.assertEqual(("a", 27017), t.get_primary())
 
 

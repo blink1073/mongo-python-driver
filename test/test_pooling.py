@@ -404,11 +404,9 @@ class TestPooling(_TestPoolingBase):
         )
 
     def test_wait_queue_timeout_does_not_leak_operation_count(self):
-        # Regression test: a checkout that fails while waiting for a pool
-        # slot must not leave operation_count, requests, or active_sockets
-        # permanently incremented, and must emit exactly one
-        # ConnectionCheckOutFailedEvent with reason TIMEOUT (not a second,
-        # bogus CONN_ERROR event from the outer except block).
+        # A checkout that fails while waiting for a pool slot must not leave
+        # operation_count, requests, or active_sockets incremented, and must
+        # emit exactly one ConnectionCheckOutFailedEvent, with reason TIMEOUT.
         wait_queue_timeout = 1  # Seconds
         listener = CMAPListener()
         pool = self.create_pool(
@@ -441,13 +439,11 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(pool.active_sockets, 0)
 
     def test_paused_pool_checkout_failure_does_not_leak_or_double_emit(self):
-        # Regression test: a checkout that fails because the pool is paused
-        # (not ready) must not leave operation_count, requests, or
-        # active_sockets permanently incremented, and must emit exactly one
-        # ConnectionCheckOutFailedEvent (not a second, bogus one from the
-        # outer except block). With no outstanding checkouts, a slot is
-        # immediately available, so this exercises the fast path's
-        # _raise_if_not_ready check.
+        # A checkout that fails because the pool is paused must not leave
+        # operation_count, requests, or active_sockets incremented, and must
+        # emit exactly one ConnectionCheckOutFailedEvent. With no outstanding
+        # checkouts a slot is immediately available, so this exercises the
+        # fast path's readiness check.
         listener = CMAPListener()
         pool = self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
         self.addCleanup(pool.close)
