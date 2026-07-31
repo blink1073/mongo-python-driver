@@ -1013,8 +1013,9 @@ class Pool:
 
         conn = None
         op_count_incremented = False
-        requests_incremented = False
-        active_sockets_incremented = False
+        slot_acquired = False
+        # Invariant: any site inside the `try` below that emits a checkout
+        # failed event must set this so the outer handler does not re-emit.
         emitted_event = False
         is_new_conn = False
 
@@ -1022,23 +1023,24 @@ class Pool:
             with self.lock:
                 self.operation_count += 1
                 op_count_incremented = True
-                # The outer `except` below emits for any exception raised in
-                # this `try`, so emitting here too would double-emit.
-                self._raise_if_not_ready(checkout_started_time, emit_event=False)
+                emitted_event = True
+                self._raise_if_not_ready(checkout_started_time, emit_event=True)
+                emitted_event = False
                 if self.requests < self.max_pool_size:
                     # Fast path: a slot is immediately available, so do all
                     # of the counter bookkeeping in this one critical section
                     # and keep the checkout to a single lock acquisition.
                     self.requests += 1
-                    requests_incremented = True
                     self.active_sockets += 1
-                    active_sockets_incremented = True
+                    slot_acquired = True
 
-            if not requests_incremented:
+            if not slot_acquired:
                 # Slow path: no slot was free, so wait on the requests
                 # semaphore for one to be released.
                 with self.size_cond:
-                    self._raise_if_not_ready(checkout_started_time, emit_event=False)
+                    emitted_event = True
+                    self._raise_if_not_ready(checkout_started_time, emit_event=True)
+                    emitted_event = False
                     while not (self.requests < self.max_pool_size):
                         timeout = deadline - time.monotonic() if deadline else None
                         if not _cond_wait(self.size_cond, timeout):
@@ -1048,13 +1050,12 @@ class Pool:
                                 self.size_cond.notify()
                             emitted_event = True
                             self._raise_wait_queue_timeout(checkout_started_time)
-                        self._raise_if_not_ready(checkout_started_time, emit_event=False)
+                        emitted_event = True
+                        self._raise_if_not_ready(checkout_started_time, emit_event=True)
+                        emitted_event = False
                     self.requests += 1
-                    requests_incremented = True
-
-                with self.lock:
                     self.active_sockets += 1
-                    active_sockets_incremented = True
+                    slot_acquired = True
 
             while conn is None:
                 # CMAP: we MUST wait for either maxConnecting OR for a socket
@@ -1100,15 +1101,12 @@ class Pool:
             if conn:
                 # We checked out a socket but authentication failed.
                 conn.close_conn(ConnectionClosedReason.ERROR)
-            if requests_incremented or active_sockets_incremented or op_count_incremented:
+            if op_count_incremented:
                 with self.size_cond:
-                    if requests_incremented:
+                    self.operation_count -= 1
+                    if slot_acquired:
                         self.requests -= 1
-                    if active_sockets_incremented:
                         self.active_sockets -= 1
-                    if op_count_incremented:
-                        self.operation_count -= 1
-                    if requests_incremented or active_sockets_incremented:
                         self.size_cond.notify()
 
             if not emitted_event:
