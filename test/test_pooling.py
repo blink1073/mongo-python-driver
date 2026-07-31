@@ -462,6 +462,39 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(len(failed_events), 1, [e.reason for e in failed_events])
         self.assertEqual(failed_events[0].reason, ConnectionCheckOutFailedReason.CONN_ERROR)
 
+    def test_checkout_failed_event_is_emitted_under_the_pool_lock(self):
+        # A readiness check that fails must publish its
+        # ConnectionCheckOutFailedEvent while still holding the pool mutex.
+        # _reset() publishes PoolClearedEvent under that same mutex precisely
+        # so that it is always recorded first; deferring the checkout failure
+        # to after the mutex is released loses that ordering (PYTHON-3519).
+        # Listeners are invoked synchronously inside the publish call, so this
+        # one observes directly whether the emitting code holds the mutex.
+        locked_while_emitting = []
+        pool_ref: list = []
+
+        class LockObservingListener(CMAPListener):
+            def connection_check_out_failed(self, event):
+                locked_while_emitting.append(pool_ref[0].lock.locked())
+                super().connection_check_out_failed(event)
+
+        listener = LockObservingListener()
+        pool = self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
+        self.addCleanup(pool.close)
+        pool_ref.append(pool)
+
+        pool.reset()  # Pause the pool.
+        listener.reset()
+        with self.assertRaises(AutoReconnect):
+            with pool.checkout():
+                pass
+
+        self.assertEqual(
+            [True],
+            locked_while_emitting,
+            "ConnectionCheckOutFailedEvent must be published while the pool mutex is held",
+        )
+
     def test_no_wait_queue_timeout(self):
         # Verify get_socket() with no wait_queue_timeout blocks forever.
         pool = self.create_pool(max_pool_size=1)
