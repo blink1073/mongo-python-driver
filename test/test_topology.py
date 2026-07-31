@@ -939,9 +939,14 @@ def create_mock_replica_set_topology(hosts=("a", "b", "c")):
 
 
 class TestTopologyDescriptionImmutability(TopologyTest):
-    """A TopologyDescription is shared by every concurrent selection call and
-    is replaced, not edited, when the topology changes (PYTHON-5898), so
-    apply_selector() must not mutate it.
+    """apply_selector() must not mutate the TopologyDescription (PYTHON-5898).
+
+    Deprioritization is specific to a single call, but the description outlives
+    it, so filtering left behind would leak into later readers such as
+    get_primary(), which builds its selection straight from the description.
+    The same object is also handed to code on other threads -- topology event
+    listeners and anything holding client.topology_description -- which may
+    read it concurrently with a selection in progress.
     """
 
     def test_concurrent_apply_selector_with_deprioritized_servers(self):
@@ -963,23 +968,33 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         barrier = threading.Barrier(6)
 
         def deprioritizing_worker():
-            barrier.wait(timeout=30)
-            for _ in range(iterations):
-                # A retryable write retrying away from the primary must never
-                # be handed the deprioritized primary back.
-                sds = description.apply_selector(
-                    ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
-                )
-                if any(sd.address == primary_sd.address for sd in sds):
-                    errors.append(f"deprioritized primary was selected: {sds}")
+            # Without this, threading would print an unexpected exception (a
+            # BrokenBarrierError from the barrier timeout, say) and discard it,
+            # leaving errors empty and passing the test vacuously.
+            try:
+                barrier.wait(timeout=30)
+                for _ in range(iterations):
+                    # A retryable write retrying away from the primary must
+                    # never be handed the deprioritized primary back.
+                    sds = description.apply_selector(
+                        ReadPreference.PRIMARY_PREFERRED, deprioritized_servers=[primary_sd]
+                    )
+                    if any(sd.address == primary_sd.address for sd in sds):
+                        errors.append(f"deprioritized primary was selected: {sds}")
+            except BaseException as exc:
+                errors.append(repr(exc))
 
         def plain_worker():
-            barrier.wait(timeout=30)
-            for _ in range(iterations):
-                # An ordinary operation must always find the healthy primary.
-                sds = description.apply_selector(Primary())
-                if [sd.address for sd in sds] != [primary_sd.address]:
-                    errors.append(f"Primary() selected {sds} instead of the primary")
+            try:
+                barrier.wait(timeout=30)
+                for _ in range(iterations):
+                    # An ordinary operation must always find the healthy
+                    # primary.
+                    sds = description.apply_selector(Primary())
+                    if [sd.address for sd in sds] != [primary_sd.address]:
+                        errors.append(f"Primary() selected {sds} instead of the primary")
+            except BaseException as exc:
+                errors.append(repr(exc))
 
         threads = [threading.Thread(target=deprioritizing_worker) for _ in range(3)]
         threads += [threading.Thread(target=plain_worker) for _ in range(3)]
@@ -1015,6 +1030,30 @@ class TestTopologyDescriptionImmutability(TopologyTest):
 
         # get_primary() must still find the primary afterwards.
         self.assertEqual(("a", 27017), t.get_primary())
+
+    def test_get_secondaries_after_deprioritized_selection(self):
+        # get_secondaries()/get_arbiters() (and client.secondaries/arbiters)
+        # also build their selection straight from the description, so a
+        # selection that deprioritizes a secondary must not drop it from a
+        # later membership listing.
+        t = create_mock_replica_set_topology()
+        self.addCleanup(t.close)
+        description = t.description
+        secondaries = {("b", 27017), ("c", 27017)}
+        secondary_sd = description.server_descriptions()[("b", 27017)]
+        self.assertEqual(SERVER_TYPE.RSSecondary, secondary_sd.server_type)
+
+        self.assertEqual(secondaries, t.get_secondaries())
+
+        # Simulate a retryable operation deprioritizing one secondary for a
+        # single selection call.
+        description.apply_selector(
+            ReadPreference.SECONDARY_PREFERRED, deprioritized_servers=[secondary_sd]
+        )
+
+        # Both secondaries must still be reported afterwards.
+        self.assertEqual(secondaries, t.get_secondaries())
+        self.assertEqual(set(), t.get_arbiters())
 
 
 if __name__ == "__main__":
