@@ -1026,23 +1026,21 @@ class Pool:
             async with self.lock:
                 self.operation_count += 1
                 op_count_incremented = True
-                # Emission is deferred to the outer `except` below (which
-                # runs for any exception raised inside this `try`, unlike
-                # the pre-refactor code where this check lived outside the
-                # `try`); emitting here too would double-emit the event.
+                # The outer `except` below emits for any exception raised in
+                # this `try`, so emitting here too would double-emit.
                 self._raise_if_not_ready(checkout_started_time, emit_event=False)
                 if self.requests < self.max_pool_size:
                     # Fast path: a slot is immediately available, so do all
-                    # of the counter bookkeeping in this single critical
-                    # section instead of taking the lock multiple times.
+                    # of the counter bookkeeping in this one critical section
+                    # and keep the checkout to a single lock acquisition.
                     self.requests += 1
                     requests_incremented = True
                     self.active_sockets += 1
                     active_sockets_incremented = True
 
             if not requests_incremented:
-                # Slow path: no slot was free. Fall back to waiting on the
-                # requests semaphore, exactly as before.
+                # Slow path: no slot was free, so wait on the requests
+                # semaphore for one to be released.
                 async with self.size_cond:
                     self._raise_if_not_ready(checkout_started_time, emit_event=False)
                     while not (self.requests < self.max_pool_size):
