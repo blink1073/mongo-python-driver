@@ -32,16 +32,18 @@ from bson.son import SON
 from pymongo import AsyncMongoClient, message, timeout
 from pymongo.errors import AutoReconnect, ConnectionFailure, DuplicateKeyError
 from pymongo.hello import HelloCompat
-from pymongo.lock import _async_create_lock
+from pymongo.lock import _async_cond_wait, _async_create_lock
 from pymongo.monitoring import (
     ConnectionCheckOutFailedEvent,
     ConnectionCheckOutFailedReason,
+    PoolClearedEvent,
     _EventListeners,
 )
 from test.asynchronous.utils import async_get_pool, async_joinall, flaky
 
 sys.path[0:0] = [""]
 
+from pymongo.asynchronous import pool as pool_module
 from pymongo.asynchronous.pool import Pool, PoolOptions
 from pymongo.socket_checker import SocketChecker
 from test.asynchronous import AsyncIntegrationTest, async_client_context, unittest
@@ -280,6 +282,7 @@ class TestPooling(_TestPoolingBase):
         # Bookkeeping must be rolled back, not left half-updated.
         self.assertEqual(0, cx_pool.active_sockets)
         self.assertEqual(0, cx_pool.requests)
+        self.assertEqual(0, cx_pool.operation_count)
 
     async def test_pool_removes_closed_socket(self):
         # Test that Pool removes explicitly closed socket.
@@ -493,6 +496,88 @@ class TestPooling(_TestPoolingBase):
             [True],
             locked_while_emitting,
             "ConnectionCheckOutFailedEvent must be published while the pool mutex is held",
+        )
+
+    async def test_checkout_failed_event_is_emitted_under_the_pool_lock_slow_path(self):
+        # Same guarantee as the test above, but for the readiness checks on
+        # the slow path. That test pauses an idle pool, so a slot is free and
+        # only the fast path runs; moving emission out from under the mutex in
+        # the slow path alone would not fail it. Here the pool's only slot is
+        # already taken, so the checkout blocks on size_cond, and reset()
+        # wakes it. This is exactly the PYTHON-3519 scenario: _reset()
+        # publishes PoolClearedEvent and calls notify_all() while holding the
+        # mutex, so the woken checkout can only publish its
+        # ConnectionCheckOutFailedEvent afterwards -- but only if it, too,
+        # publishes while still holding the mutex.
+        locked_while_emitting = []
+        pool_ref: list = []
+
+        class LockObservingListener(CMAPListener):
+            def connection_check_out_failed(self, event):
+                locked_while_emitting.append(pool_ref[0].lock.locked())
+                super().connection_check_out_failed(event)
+
+        listener = LockObservingListener()
+        pool = await self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
+        self.addAsyncCleanup(pool.close)
+        pool_ref.append(pool)
+
+        errors: list = []
+
+        async def blocked_checkout():
+            try:
+                async with pool.checkout():
+                    pass
+            except BaseException as exc:
+                errors.append(exc)
+
+        # The checkout must be parked on size_cond before the pool is reset,
+        # otherwise it could still fail on the fast path and this test would
+        # silently duplicate the one above. Flag it from inside the condition
+        # wait itself: the flag is set while size_cond is still held, so
+        # reset() cannot acquire the mutex until the checkout has released it
+        # by blocking.
+        parked: list = []
+        real_cond_wait = _async_cond_wait
+
+        async def flagging_cond_wait(condition, timeout):
+            if condition is pool.size_cond:
+                parked.append(True)
+            return await real_cond_wait(condition, timeout)
+
+        with patch.object(pool_module, "_async_cond_wait", flagging_cond_wait):
+            async with pool.checkout():
+                listener.reset()
+                task = ConcurrentRunner(target=blocked_checkout, name="blocked_checkout")
+                await task.start()
+
+                start = time.monotonic()
+                while not parked:  # noqa: ASYNC110, RUF100
+                    self.assertLess(
+                        time.monotonic() - start, 30, "checkout never blocked on size_cond"
+                    )
+                    await asyncio.sleep(0.01)
+
+                await pool.reset()  # Pause the pool and wake the blocked checkout.
+                await task.join(30)
+                self.assertFalse(task.is_alive(), "blocked checkout never finished")
+
+        self.assertEqual(1, len(errors), f"expected exactly one failed checkout, got {errors}")
+        self.assertIsInstance(errors[0], AutoReconnect)
+        self.assertEqual(
+            [True],
+            locked_while_emitting,
+            "ConnectionCheckOutFailedEvent must be published while the pool mutex is held",
+        )
+        # PYTHON-3519: the clear that caused the failure must be recorded first.
+        self.assertEqual(
+            [PoolClearedEvent, ConnectionCheckOutFailedEvent],
+            [
+                type(event)
+                for event in listener.events_by_type(
+                    (PoolClearedEvent, ConnectionCheckOutFailedEvent)
+                )
+            ],
         )
 
     async def test_no_wait_queue_timeout(self):
