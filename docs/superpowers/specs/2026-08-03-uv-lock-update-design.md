@@ -64,7 +64,7 @@ Three separable pieces, in dependency order.
 | `.gitignore` | Remove the `# uv lockfiles` / `uv.lock` block |
 | `uv.lock` | Generate with `uv lock --upgrade`, commit |
 | `.github/dependabot.yml` | uv entry gets `applies-to: security-updates` and `open-pull-requests-limit: 0` |
-| `.github/workflows/test-python.yml` | `static` job gains a `uv lock --check` step and a step running the lock diff test |
+| `.github/workflows/test-python.yml` | `static` job gains a `uv lock --check` step and a step running both action test scripts |
 | `CONTRIBUTING.md` | Rewrite the "Dependabot updates" section |
 
 The committed lock must be produced by `uv lock --upgrade`, not by committing
@@ -84,10 +84,14 @@ resulting behavior should be confirmed after merge.
 .github/actions/uv-lock-update/
   action.yml
   diff_lock.py
-  test_diff_lock.py
+  decide_pr_action.sh
+  test_diff_lock.sh
+  test_decide_pr_action.sh
 ```
 
-Structure follows `Calysto/maintainer_tools/actions/poetry-lock-update`.
+Structure mirrors `Calysto/maintainer_tools/actions/poetry-lock-update`
+file for file, including its shell based tests. Matching the reference layout is
+what keeps the eventual move to drivers-github-tools a copy rather than a port.
 
 The action assumes only that the repo is checked out and `uv` is on `PATH`. It
 does not install uv, so it carries no pinned third party dependency into
@@ -100,7 +104,7 @@ drivers-github-tools; the consuming workflow controls the uv version.
 | `app-id` | `""` | GitHub App ID. Falls back to `github.token` when empty. |
 | `app-private-key` | `""` | GitHub App private key. |
 | `branch` | `uv-lock-update` | Fixed branch, force pushed each run. |
-| `base` | `main` | PR base branch. |
+| `base` | `main` | PR base branch. Not present in the reference action, which lets `gh` infer it. Explicit is better for an action that will run unattended in repos with release branches. |
 | `labels` | `dependencies` | Labels applied to the PR. |
 | `dry-run` | `"false"` | Skip push and PR creation. |
 
@@ -120,26 +124,52 @@ action silently contradict the repo's own policy.
 5. Build the PR body from `diff_lock.py`.
 6. Commit as `github-actions[bot]`, set an authenticated remote URL, force push
    the fixed branch.
-7. Query `gh pr list --head "$BRANCH" --state open`. Create the PR with an
-   explicit `--base` if none exists, otherwise update the existing PR body.
+7. Delegate to `decide_pr_action.sh`.
 
-Step 7 is the one real divergence from the poetry action, which creates a random
-suffix branch and therefore a new PR every run. A fixed branch with force push
-plus create-or-update keeps exactly one open PR and prevents stale PRs
-accumulating, satisfying the "single PR" requirement.
+#### PR de-duplication
+
+`decide_pr_action.sh` takes branch, title, body, labels, and dry-run, then
+queries `gh pr list --head "$BRANCH" --state open`. An open PR on the branch is
+updated in place with `gh pr edit`; otherwise a new PR is created. A merged or
+manually closed PR is not "open", so it falls through to creating a fresh one
+with no extra state to track.
+
+This pairs with the force push in step 6. The branch is exclusively bot owned and
+rebuilt from base every run, so overwriting whatever the remote holds is always
+safe. Together they guarantee exactly one open PR and prevent the stale PR
+accumulation a random suffix branch would cause.
+
+Keeping this in its own script rather than inlining it in `action.yml` is what
+makes it testable: `test_decide_pr_action.sh` puts a fake `gh` on `PATH` that
+logs its invocations and answers `pr list` from a canned JSON file, then asserts
+which of create or edit was called across four cases (no open PR, open PR, open
+PR under dry-run, no open PR under dry-run).
 
 #### Lock diff script
 
 `diff_lock.py` reads both lock files with `tomllib`, falling back to `tomli` on
-older interpreters as the poetry action does. It extracts `[[package]]` name and
-version pairs and emits markdown sections for added, removed, and updated
-packages. A `uv.lock` diff runs to hundreds of thousands of lines, so the summary
-is what makes the PR reviewable.
+older interpreters as the poetry action does, and emits a markdown list of added,
+removed, and changed packages. A `uv.lock` diff runs to hundreds of thousands of
+lines, so the summary is what makes the PR reviewable.
 
-The script is a pure function over two file paths with no GitHub coupling, so
-`test_diff_lock.py` covers it with fixture strings. `pyproject.toml` sets
-`testpaths = ["test"]`, so this test is not collected by default and the `static`
-job runs it explicitly, matching the existing `tools/test_synchro.py` step.
+**This is where the port diverges from the reference.** The reference builds
+`dict[str, str]` keyed on package name, which is correct for poetry, where each
+package appears once. uv emits one `[[package]]` entry per resolution fork, so a
+package resolved differently across Python versions appears several times. In the
+current lock, 129 entries cover 93 unique names, with `sphinx` appearing three
+times and 35 other names twice. Keying on name would silently keep whichever
+entry parsed last and report phantom upgrades while hiding real ones.
+
+Our `load_versions` therefore maps each name to the sorted set of its versions,
+and `diff_versions` compares those sets, rendering multi-version packages as
+`- sphinx: 7.4.7, 8.1.3 → 7.4.7, 8.2.0`. This fix should be contributed back to
+the reference action, since any uv consumer hits it.
+
+`test_diff_lock.sh` follows the reference test, with added cases for a package
+gaining a version, losing one, and changing one of several.
+
+All four shell files need the executable bit set. The repo's `executable-shell`
+pre-commit hook enforces the shebang and permission bit agreeing.
 
 ### C. Workflow
 
@@ -194,8 +224,11 @@ onto the same App token is a reasonable follow up.
 
 - `uv lock --upgrade` then `uv lock --check` passes.
 - `rm uv.lock && uv lock --upgrade` reproduces byte identical output.
-- `test_diff_lock.py` passes.
-- `just typing`, `just lint`, and `just lint-manual` pass.
+- `test_diff_lock.sh` and `test_decide_pr_action.sh` pass. Both are run against
+  the real current lock as well as fixtures, so the multi-version handling is
+  exercised on actual uv output rather than only on synthetic input.
+- `just typing`, `just lint`, and `just lint-manual` pass. `lint-manual` runs
+  shellcheck, which covers the two new shell scripts and the test scripts.
 - The zizmor workflow passes on the new workflow and action. The `unpinned-uses`
   policy allows ref pins for `actions/*`, so tag pinning
   `actions/create-github-app-token` is acceptable; `astral-sh/setup-uv` is SHA
