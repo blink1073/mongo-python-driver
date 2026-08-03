@@ -371,7 +371,9 @@ class TopologyDescription:
             selection = selector(selection)
             # No suitable servers found, apply preference again but include deprioritized servers.
             if not selection and deprioritized_servers:
-                selection = Selection.from_topology_description(self, self._filter_servers(None))
+                # No candidate filtering: from_topology_description() defaults
+                # to all known servers.
+                selection = Selection.from_topology_description(self)
                 selection = selector(selection)
 
         # Apply custom selector followed by localThresholdMS.
