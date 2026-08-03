@@ -908,9 +908,14 @@ class TestServerSelectionErrors(TopologyTest):
         self.assertMessage("No mongoses available", t)
 
 
-def create_mock_replica_set_topology(hosts=("a", "b", "c")):
-    """A ReplicaSetWithPrimary topology: hosts[0] is primary, the rest secondary."""
-    t = create_mock_topology(seeds=list(hosts), replica_set_name="rs")
+def create_mock_replica_set_topology(hosts=("a", "b", "c"), arbiters=()):
+    """A ReplicaSetWithPrimary topology: hosts[0] is primary, the rest secondary.
+
+    Any names in ``arbiters`` join the set as arbiters.
+    """
+    arbiters = list(arbiters)
+    members = {"hosts": list(hosts), "arbiters": arbiters}
+    t = create_mock_topology(seeds=list(hosts) + arbiters, replica_set_name="rs")
     got_hello(
         t,
         (hosts[0], 27017),
@@ -918,8 +923,8 @@ def create_mock_replica_set_topology(hosts=("a", "b", "c")):
             "ok": 1,
             HelloCompat.LEGACY_CMD: True,
             "setName": "rs",
-            "hosts": list(hosts),
             "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
+            **members,
         },
     )
     for host in hosts[1:]:
@@ -931,8 +936,21 @@ def create_mock_replica_set_topology(hosts=("a", "b", "c")):
                 HelloCompat.LEGACY_CMD: False,
                 "secondary": True,
                 "setName": "rs",
-                "hosts": list(hosts),
                 "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
+                **members,
+            },
+        )
+    for arbiter in arbiters:
+        got_hello(
+            t,
+            (arbiter, 27017),
+            {
+                "ok": 1,
+                HelloCompat.LEGACY_CMD: False,
+                "arbiterOnly": True,
+                "setName": "rs",
+                "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
+                **members,
             },
         )
     return t
@@ -1036,24 +1054,29 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         # also build their selection straight from the description, so a
         # selection that deprioritizes a secondary must not drop it from a
         # later membership listing.
-        t = create_mock_replica_set_topology()
+        t = create_mock_replica_set_topology(arbiters=("d",))
         self.addCleanup(t.close)
         description = t.description
         secondaries = {("b", 27017), ("c", 27017)}
+        arbiters = {("d", 27017)}
         secondary_sd = description.server_descriptions()[("b", 27017)]
         self.assertEqual(SERVER_TYPE.RSSecondary, secondary_sd.server_type)
+        arbiter_sd = description.server_descriptions()[("d", 27017)]
+        self.assertEqual(SERVER_TYPE.RSArbiter, arbiter_sd.server_type)
 
         self.assertEqual(secondaries, t.get_secondaries())
+        self.assertEqual(arbiters, t.get_arbiters())
 
-        # Simulate a retryable operation deprioritizing one secondary for a
-        # single selection call.
+        # Simulate a retryable operation deprioritizing one secondary and the
+        # arbiter for a single selection call.
         description.apply_selector(
-            ReadPreference.SECONDARY_PREFERRED, deprioritized_servers=[secondary_sd]
+            ReadPreference.SECONDARY_PREFERRED,
+            deprioritized_servers=[secondary_sd, arbiter_sd],
         )
 
-        # Both secondaries must still be reported afterwards.
+        # Both secondaries and the arbiter must still be reported afterwards.
         self.assertEqual(secondaries, t.get_secondaries())
-        self.assertEqual(set(), t.get_arbiters())
+        self.assertEqual(arbiters, t.get_arbiters())
 
 
 if __name__ == "__main__":
