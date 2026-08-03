@@ -580,6 +580,56 @@ class TestPooling(_TestPoolingBase):
             ],
         )
 
+    async def test_uncontended_checkout_pool_lock_acquisitions(self):
+        # An uncontended checkout must do all of its operation_count,
+        # requests and active_sockets bookkeeping in a single critical
+        # section. Pinning the acquisition count keeps that from silently
+        # regressing: splitting the bookkeeping back apart would still pass
+        # every other test in this file.
+        #
+        # Two acquisitions are expected for a warm checkout that reuses an
+        # idle connection: one for the merged bookkeeping, and one to
+        # register the connection's cancel context. size_cond and
+        # _max_connecting_cond are distinct objects wrapping the same mutex,
+        # so their blocks are not counted here.
+        pool = await self.create_pool(max_pool_size=1)
+        self.addAsyncCleanup(pool.close)
+
+        # Check a connection out and back in first, so this measurement
+        # covers a warm pool and does not include connection establishment.
+        async with pool.checkout():
+            pass
+
+        acquires = 0
+        real_lock = pool.lock
+
+        class CountingLock:
+            async def __aenter__(self):
+                nonlocal acquires
+                acquires += 1
+                return await real_lock.__aenter__()
+
+            async def __aexit__(self, *args):
+                return await real_lock.__aexit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(real_lock, name)
+
+        pool.lock = CountingLock()  # type: ignore[assignment]
+        try:
+            async with pool.checkout():
+                checkout_acquires = acquires
+        finally:
+            pool.lock = real_lock
+
+        self.assertEqual(
+            2,
+            checkout_acquires,
+            f"an uncontended checkout should acquire the pool lock twice -- once for "
+            f"counter bookkeeping and once to register the cancel context -- got "
+            f"{checkout_acquires}",
+        )
+
     async def test_no_wait_queue_timeout(self):
         # Verify get_socket() with no wait_queue_timeout blocks forever.
         pool = await self.create_pool(max_pool_size=1)
