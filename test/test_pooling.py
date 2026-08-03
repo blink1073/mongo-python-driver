@@ -630,6 +630,64 @@ class TestPooling(_TestPoolingBase):
             f"{checkout_acquires}",
         )
 
+    def test_contended_checkout_pool_lock_acquisitions(self):
+        # The same guarantee as the test above, for a checkout that has to
+        # wait for a slot: its requests and active_sockets bookkeeping belongs
+        # in the one size_cond critical section, not in a further acquisition
+        # afterwards.
+        #
+        # Driven from a single task so the count is not polluted by the
+        # releasing side -- checkin() acquires the pool lock twice itself. The
+        # slot is freed from inside the condition wait, which is where a real
+        # witer would be woken.
+        pool = self.create_pool(max_pool_size=1)
+        self.addCleanup(pool.close)
+
+        with pool.checkout():
+            pass
+
+        # Make the fast path's slot check fail so the slow path runs.
+        pool.requests = pool.max_pool_size
+
+        real_cond_wait = _cond_wait
+
+        def releasing_cond_wait(condition, timeout):
+            if condition is pool.size_cond:
+                pool.requests = 0
+                return True
+            return real_cond_wait(condition, timeout)
+
+        acquires = 0
+        real_lock = pool.lock
+
+        class CountingLock:
+            def __enter__(self):
+                nonlocal acquires
+                acquires += 1
+                return real_lock.__enter__()
+
+            def __exit__(self, *args):
+                return real_lock.__exit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(real_lock, name)
+
+        pool.lock = CountingLock()  # type: ignore[assignment]
+        try:
+            with patch.object(pool_module, "_cond_wait", releasing_cond_wait):
+                with pool.checkout():
+                    checkout_acquires = acquires
+        finally:
+            pool.lock = real_lock
+
+        self.assertEqual(
+            2,
+            checkout_acquires,
+            f"a checkout that waited for a slot should acquire the pool lock twice -- "
+            f"once for counter bookkeeping and once to register the cancel context -- "
+            f"got {checkout_acquires}",
+        )
+
     def test_no_wait_queue_timeout(self):
         # Verify get_socket() with no wait_queue_timeout blocks forever.
         pool = self.create_pool(max_pool_size=1)
