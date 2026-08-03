@@ -1014,8 +1014,10 @@ class Pool:
         conn = None
         op_count_incremented = False
         # Each flag is set immediately after its own increment, with no
-        # statement in between, so an interrupt cannot leave a counter
-        # incremented but unrecorded.
+        # statement in between, which narrows the window in which an interrupt
+        # could leave a counter incremented but unrecorded to a single
+        # statement boundary. It does not close the window entirely: the
+        # increment and the flag assignment are still separate statements.
         requests_incremented = False
         active_sockets_incremented = False
         # Invariant: any site inside the `try` below that emits a checkout
@@ -1040,8 +1042,10 @@ class Pool:
                     active_sockets_incremented = True
 
             if not requests_incremented:
-                # Slow path: no slot was free, so wait on the requests
-                # semaphore for one to be released.
+                # Slow path: no slot was free under the pool mutex. Re-check
+                # under size_cond -- a slot may have been released in the
+                # meantime, in which case the loop below never waits -- and
+                # otherwise wait for one to be released.
                 with self.size_cond:
                     emitted_event = True
                     self._raise_if_not_ready(checkout_started_time, emit_event=True)
@@ -1113,8 +1117,10 @@ class Pool:
                     if active_sockets_incremented:
                         self.active_sockets -= 1
                     if requests_incremented:
-                        # Notify last, so a witer wakes to consistent counters.
                         self.requests -= 1
+                        # Notify only when a slot was actually released;
+                        # otherwise there is nothing for a blocked checkout to
+                        # wake up for.
                         self.size_cond.notify()
 
             if not emitted_event:
