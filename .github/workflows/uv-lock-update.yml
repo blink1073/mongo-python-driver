@@ -35,7 +35,7 @@ jobs:
       # TEMPORARY: pinned to an unmerged branch of a fork for end to end testing.
       # Repin to mongodb-labs/drivers-github-tools/python/uv-lock-update@<sha> # v3
       # before this is merged.
-      - uses: blink1073/drivers-github-tools/python/uv-lock-update@1346a72cb0074730fa60c6011ee6ea383ee6a682
+      - uses: blink1073/drivers-github-tools/python/uv-lock-update@7daba1126df7c2b5c2f1203feec67d2c70e9d791
         with:
           app_id: ${{ vars.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
