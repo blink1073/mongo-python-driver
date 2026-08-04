@@ -61,15 +61,32 @@ does not merge a branch reference.
 
 These are deliberately excluded and tracked separately:
 
-- **Evergreen lockfile use.** `.evergreen/scripts/configure-env.sh` keeps
-  `UV_NO_LOCK=1`. The drift gate lives in GitHub Actions only. Changing Evergreen
-  would affect the entire test matrix for no benefit to the stated acceptance
-  criteria.
-- **`set-uv-exclude-newer` cleanup.** `.github/actions/set-uv-exclude-newer` and
-  the Evergreen `UV_EXCLUDE_NEWER` export are arguably redundant now that
-  `pyproject.toml` carries `exclude-newer = "7 days"`. Unrelated to this ticket.
 - **Restoring the `uv-lock` pre-commit hook.** Considered and rejected. CI
   reports drift; contributors fix it with a documented command.
+
+## Removing `set-uv-exclude-newer`
+
+This was originally scoped out as redundant cleanup. That was wrong: it is
+incompatible with a committed lock, and end to end testing surfaced it.
+
+`.github/actions/set-uv-exclude-newer` exported an absolute `UV_EXCLUDE_NEWER`
+date. An absolute value overrides `pyproject.toml`'s relative
+`exclude-newer = "7 days"`, so uv drops `exclude-newer-span` and rewrites
+`uv.lock` on any sync. In CI that made the `ruff` pre-commit hook fail with
+"files were modified by this hook" on every run, and because the exported date
+advances daily the lock would never settle.
+
+The action is deleted and its 8 usages removed from `test-python.yml`.
+`pyproject.toml` supplies the cooldown natively and records it in the lock, so
+nothing is lost.
+
+Two related corrections to earlier assumptions in this document:
+
+- Evergreen does **not** set `UV_NO_LOCK` or `UV_EXCLUDE_NEWER`. Commit
+  `74c011f9` removed both. Evergreen therefore uses the committed lock, which is
+  the desired behavior and needs no change.
+- That composite action was the only thing setting `UV_EXCLUDE_NEWER` anywhere in
+  the repo, so removing it fully resolves the conflict.
 
 ## Part A: the shared action
 
