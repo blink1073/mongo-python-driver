@@ -1014,11 +1014,8 @@ class Pool:
 
         conn = None
         op_count_incremented = False
-        # Each flag is set immediately after its own increment, with no
-        # statement in between, which narrows the window in which an interrupt
-        # could leave a counter incremented but unrecorded to a single
-        # statement boundary. It does not close the window entirely: the
-        # increment and the flag assignment are still separate statements.
+        # Set each flag immediately after its own increment, so an interrupt
+        # can leave a counter unrecorded across at most one statement.
         requests_incremented = False
         active_sockets_incremented = False
         # Invariant: any site inside the `try` below that emits a checkout
@@ -1034,19 +1031,15 @@ class Pool:
                 self._raise_if_not_ready(checkout_started_time, emit_event=True)
                 emitted_event = False
                 if self.requests < self.max_pool_size:
-                    # Fast path: a slot is immediately available, so do all
-                    # of the counter bookkeeping in this one critical section
-                    # and keep the checkout to a single lock acquisition.
+                    # Fast path: a slot is free, so all the counter
+                    # bookkeeping fits in this one critical section.
                     self.requests += 1
                     requests_incremented = True
                     self.active_sockets += 1
                     active_sockets_incremented = True
 
             if not requests_incremented:
-                # Slow path: no slot was free under the pool mutex. Re-check
-                # under size_cond -- a slot may have been released in the
-                # meantime, in which case the loop below never waits -- and
-                # otherwise wait for one to be released.
+                # Slow path: re-check under size_cond, then wait for a slot.
                 with self.size_cond:
                     emitted_event = True
                     self._raise_if_not_ready(checkout_started_time, emit_event=True)
@@ -1119,9 +1112,7 @@ class Pool:
                         self.active_sockets -= 1
                     if requests_incremented:
                         self.requests -= 1
-                        # Notify only when a slot was actually released;
-                        # otherwise there is nothing for a blocked checkout to
-                        # wake up for.
+                        # Notify only when a slot was actually released.
                         self.size_cond.notify()
 
             if not emitted_event:

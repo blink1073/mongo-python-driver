@@ -43,10 +43,8 @@ class Selection:
         """Build a Selection from a TopologyDescription.
 
         :param topology_description: the TopologyDescription to select from.
-        :param candidate_servers: the servers eligible for selection. Defaults
-            to all known servers. Server selection passes its own (per-call,
-            deprioritization-filtered) list here so that no state has to be
-            cached on the TopologyDescription.
+        :param candidate_servers: the servers eligible for selection, defaulting
+            to all known servers.
         """
         if candidate_servers is None:
             candidate_servers = topology_description.known_servers

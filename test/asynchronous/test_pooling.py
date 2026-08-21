@@ -466,13 +466,11 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(failed_events[0].reason, ConnectionCheckOutFailedReason.CONN_ERROR)
 
     async def test_checkout_failed_event_is_emitted_under_the_pool_lock(self):
-        # A readiness check that fails must publish its
-        # ConnectionCheckOutFailedEvent while still holding the pool mutex.
-        # _reset() publishes PoolClearedEvent under that same mutex precisely
-        # so that it is always recorded first; deferring the checkout failure
-        # to after the mutex is released loses that ordering (PYTHON-3519).
-        # Listeners are invoked synchronously inside the publish call, so this
-        # one observes directly whether the emitting code holds the mutex.
+        # A failing readiness check must publish its
+        # ConnectionCheckOutFailedEvent while still holding the pool mutex, so
+        # that _reset()'s PoolClearedEvent is always recorded first
+        # (PYTHON-3519). Listeners run synchronously inside the publish call,
+        # so this one sees whether the emitting code holds the mutex.
         locked_while_emitting = []
         pool_ref: list = []
 
@@ -499,16 +497,10 @@ class TestPooling(_TestPoolingBase):
         )
 
     async def test_checkout_failed_event_is_emitted_under_the_pool_lock_slow_path(self):
-        # Same guarantee as the test above, but for the readiness checks on
-        # the slow path. That test pauses an idle pool, so a slot is free and
-        # only the fast path runs; moving emission out from under the mutex in
-        # the slow path alone would not fail it. Here the pool's only slot is
-        # already taken, so the checkout blocks on size_cond, and reset()
-        # wakes it. This is exactly the PYTHON-3519 scenario: _reset()
-        # publishes PoolClearedEvent and calls notify_all() while holding the
-        # mutex, so the woken checkout can only publish its
-        # ConnectionCheckOutFailedEvent afterwards -- but only if it, too,
-        # publishes while still holding the mutex.
+        # Same guarantee as the test above, for the slow path. That test
+        # pauses an idle pool, so only the fast path runs and a slow-path
+        # regression would not fail it. Here the only slot is taken, so the
+        # checkout blocks on size_cond and reset() wakes it.
         locked_while_emitting = []
         pool_ref: list = []
 
@@ -531,12 +523,9 @@ class TestPooling(_TestPoolingBase):
             except BaseException as exc:
                 errors.append(exc)
 
-        # The checkout must be parked on size_cond before the pool is reset,
-        # otherwise it could still fail on the fast path and this test would
-        # silently duplicate the one above. Flag it from inside the condition
-        # wait itself: the flag is set while size_cond is still held, so
-        # reset() cannot acquire the mutex until the checkout has released it
-        # by blocking.
+        # The checkout must be parked on size_cond before the reset, or it
+        # would fail on the fast path and duplicate the test above. Flag it
+        # from inside the wait, while size_cond is still held.
         parked: list = []
         real_cond_wait = _async_cond_wait
 
@@ -581,17 +570,14 @@ class TestPooling(_TestPoolingBase):
         )
 
     async def test_uncontended_checkout_pool_lock_acquisitions(self):
-        # An uncontended checkout must do all of its operation_count,
-        # requests and active_sockets bookkeeping in a single critical
-        # section. Pinning the acquisition count keeps that from silently
-        # regressing: splitting the bookkeeping back apart would still pass
-        # every other test in this file.
+        # An uncontended checkout must do its operation_count, requests and
+        # active_sockets bookkeeping in one critical section; splitting that
+        # back apart would pass every other test in this file.
         #
-        # Two acquisitions are expected for a warm checkout that reuses an
-        # idle connection: one for the merged bookkeeping, and one to
-        # register the connection's cancel context. size_cond and
-        # _max_connecting_cond are distinct objects wrapping the same mutex,
-        # so their blocks are not counted here.
+        # Two acquisitions are expected for a warm checkout: one for the
+        # bookkeeping, one to register the cancel context. size_cond and
+        # _max_connecting_cond are separate objects, so this does not count
+        # their blocks.
         pool = await self.create_pool(max_pool_size=1)
         self.addAsyncCleanup(pool.close)
 
@@ -625,21 +611,18 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(
             2,
             checkout_acquires,
-            f"an uncontended checkout should acquire the pool lock twice -- once for "
-            f"counter bookkeeping and once to register the cancel context -- got "
+            f"an uncontended checkout should acquire the pool lock twice, once for "
+            f"counter bookkeeping and once to register the cancel context, got "
             f"{checkout_acquires}",
         )
 
     async def test_contended_checkout_pool_lock_acquisitions(self):
-        # The same guarantee as the test above, for a checkout that has to
-        # wait for a slot: its requests and active_sockets bookkeeping belongs
-        # in the one size_cond critical section, not in a further acquisition
-        # afterwards.
+        # Same guarantee as the test above, for a checkout that waits for a
+        # slot: its bookkeeping belongs in the one size_cond critical section.
         #
-        # Driven from a single task so the count is not polluted by the
-        # releasing side -- checkin() acquires the pool lock twice itself. The
-        # slot is freed from inside the condition wait, which is where a real
-        # waiter would be woken.
+        # Driven from a single task, because checkin() acquires the pool lock
+        # twice and would pollute the count. The slot is freed from inside the
+        # condition wait, where a real waiter would be woken.
         pool = await self.create_pool(max_pool_size=1)
         self.addAsyncCleanup(pool.close)
 
@@ -683,8 +666,8 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(
             2,
             checkout_acquires,
-            f"a checkout that waited for a slot should acquire the pool lock twice -- "
-            f"once for counter bookkeeping and once to register the cancel context -- "
+            f"a checkout that waited for a slot should acquire the pool lock twice, "
+            f"once for counter bookkeeping and once to register the cancel context, "
             f"got {checkout_acquires}",
         )
 

@@ -960,11 +960,8 @@ class TestTopologyDescriptionImmutability(TopologyTest):
     """apply_selector() must not mutate the TopologyDescription (PYTHON-5898).
 
     Deprioritization is specific to a single call, but the description outlives
-    it, so filtering left behind would leak into later readers such as
-    get_primary(), which builds its selection straight from the description.
-    The same object is also handed to code on other threads -- topology event
-    listeners and anything holding client.topology_description -- which may
-    read it concurrently with a selection in progress.
+    it, so filtering left behind would narrow later readers such as
+    get_primary().
     """
 
     def test_concurrent_apply_selector_with_deprioritized_servers(self):
