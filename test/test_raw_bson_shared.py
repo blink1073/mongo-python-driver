@@ -413,5 +413,65 @@ class TestRawBSONDocumentConcurrency(unittest.TestCase):
             self.assertEqual(copied["small"]["n"], 1)
 
 
+class _FakeBulkWriteContext:
+    """Stand-in for pymongo.message._BulkWriteContext.
+
+    The C batched-message builders only read four numeric attributes off
+    the context object, so a plain object exposing those is enough to
+    drive them without a live server connection.
+    """
+
+    max_bson_size = 16 * 1024 * 1024
+    max_write_batch_size = 100000
+    max_message_size = 48 * 1024 * 1024
+    max_split_size = 16 * 1024 * 1024
+
+
+class TestBatchedMessageBuilderConcurrency(unittest.TestCase):
+    def test_concurrent_batched_message_building(self):
+        try:
+            from pymongo import _cmessage
+        except ImportError:
+            self.skipTest("pymongo._cmessage C extension is not built")
+
+        has_op_msg = hasattr(_cmessage, "_encode_batched_op_msg")
+        has_write_cmd = hasattr(_cmessage, "_encode_batched_write_command")
+        if not (has_op_msg or has_write_cmd):
+            self.skipTest("no batched message builder found on pymongo._cmessage")
+
+        ns = "db.coll"
+        docs = [{"_id": i, "payload": "y" * 100} for i in range(50)]
+        command = {"insert": "coll", "ordered": True}
+        ctx = _FakeBulkWriteContext()
+        insert_op = 0  # pymongo.message._INSERT
+
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+
+        def worker() -> None:
+            try:
+                for _ in range(N_ITERS):
+                    if has_op_msg:
+                        _cmessage._encode_batched_op_msg(
+                            insert_op, command, docs, True, DEFAULT_RAW_BSON_OPTIONS, ctx
+                        )
+                    if has_write_cmd:
+                        _cmessage._encode_batched_write_command(
+                            ns, insert_op, command, docs, DEFAULT_RAW_BSON_OPTIONS, ctx
+                        )
+            except BaseException as exc:
+                with errors_lock:
+                    errors.append(exc)
+                raise
+
+        threads = [threading.Thread(target=worker) for _ in range(N_THREADS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+
+
 if __name__ == "__main__":
     unittest.main()
