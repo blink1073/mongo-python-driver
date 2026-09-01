@@ -1,14 +1,18 @@
 # ThreadSanitizer suppressions for known-benign races inside CPython's own
 # free-threaded interpreter internals (biased reference counting machinery
-# in Python/brc.c and Python/object_stack.c). These surface because
+# in Python/brc.c and Python/object_stack.c, thread-local bytecode caching
+# in Objects/codeobject.c, and per-object local-refcount-table resizing in
+# Python/uniqueid.c). These surface because
 # .evergreen/scripts/run-sanitizer-tests.sh LD_PRELOADs libtsan.so onto a
 # prebuilt, non-TSan-instrumented free-threaded CPython interpreter rather
 # than building the interpreter itself from source with -fsanitize=thread
 # (which would make CI far slower). Without compile-time instrumentation on
 # CPython's own atomics/locks, TSan cannot see their real synchronization
-# and reports false positives in the interpreter's own biased-refcounting
-# machinery. See PYTHON-6048.
+# and reports false positives in the interpreter's own internal machinery.
+# See PYTHON-6048.
 #
 # Reference: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
 race:_Py_brc_merge_refcounts
 race:_Py_brc_queue_object
+race:create_tlbc_lock_held
+race:resize_local_refcounts
