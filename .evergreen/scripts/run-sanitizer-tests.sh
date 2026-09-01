@@ -7,17 +7,14 @@ set -eu
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 SANITIZER=${SANITIZER:?"SANITIZER must be set to 'asan' or 'tsan'"}
-PYTHON_BIN=${PYTHON_BIN:-python3}
+UV_PYTHON=${UV_PYTHON:-3.13}
 TEST_FILES=(test/test_bson.py test/test_raw_bson.py test/test_raw_bson_shared.py test/test_client.py)
 
-# Upgrade pip first so the isolated build environment is created by a modern pip
-# that correctly resolves the full dependency graph for build backends like hatchling.
-"$PYTHON_BIN" -m pip install --upgrade pip
-
-# A stale build/ can leave a .so linked against the wrong sanitizer's
-# runtime without a build error, so always start clean.
+# A stale build/ or venv can leave a .so or install linked against the wrong
+# sanitizer's runtime without a build error, so always start clean.
 rm -rf build
 rm -f bson/*.so pymongo/*.so
+rm -rf .sanitizer-venv
 
 export CC=${CC:-clang}
 export CXX=${CXX:-clang++}
@@ -51,12 +48,14 @@ if [ ! -f "$RUNTIME_LIB" ]; then
   exit 1
 fi
 
-"$PYTHON_BIN" -m pip install -e . --force-reinstall --no-deps
-"$PYTHON_BIN" -m pip install pytest
+uv venv --python "$UV_PYTHON" .sanitizer-venv
+VENV_PYTHON=.sanitizer-venv/bin/python3
+uv pip install --python "$VENV_PYTHON" -e . --reinstall --no-deps
+uv pip install --python "$VENV_PYTHON" pytest
 
 LOG_FILE=$(mktemp)
 set +e
-LD_PRELOAD="$RUNTIME_LIB" "$PYTHON_BIN" -m pytest -v "${TEST_FILES[@]}" 2>&1 | tee "$LOG_FILE"
+LD_PRELOAD="$RUNTIME_LIB" "$VENV_PYTHON" -m pytest -v "${TEST_FILES[@]}" 2>&1 | tee "$LOG_FILE"
 PYTEST_STATUS=${PIPESTATUS[0]}
 set -e
 
