@@ -19,9 +19,6 @@ rm -rf .sanitizer-venv
 export CC=${CC:-clang}
 export CXX=${CXX:-clang++}
 export PYMONGO_C_EXT_MUST_BUILD=1
-# Route CPython's own allocations through the system allocator so ASan's
-# redzones can see them; pymalloc otherwise hides real bugs and adds noise.
-export PYTHONMALLOC=malloc
 
 case "$SANITIZER" in
   asan)
@@ -30,6 +27,11 @@ case "$SANITIZER" in
     RUNTIME_LIB=$("$CC" -print-file-name=libasan.so)
     export ASAN_OPTIONS="detect_leaks=0"
     export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+    # Route CPython's own allocations through the system allocator so ASan's
+    # redzones can see them; pymalloc otherwise hides real bugs and adds
+    # noise. The free-threaded TSan interpreter doesn't accept this value,
+    # so it's scoped to ASan only.
+    export PYTHONMALLOC=malloc
     ;;
   tsan)
     export CFLAGS="-fsanitize=thread -fno-omit-frame-pointer -g -O0"
@@ -50,7 +52,7 @@ fi
 
 uv venv --python "$UV_PYTHON" .sanitizer-venv
 VENV_PYTHON=.sanitizer-venv/bin/python3
-uv pip install --python "$VENV_PYTHON" -e . --reinstall --no-deps
+uv pip install --python "$VENV_PYTHON" -e . --reinstall
 uv pip install --python "$VENV_PYTHON" -r requirements/test.txt
 
 LOG_FILE=$(mktemp)
