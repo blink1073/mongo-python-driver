@@ -47,6 +47,8 @@ if [ ! -f "$RUNTIME_LIB" ]; then
   exit 1
 fi
 
+export PIP_CONSTRAINT="$(mktemp)"
+echo "packaging>=24.2" > "$PIP_CONSTRAINT"
 "$PYTHON_BIN" -m pip install -e . --force-reinstall --no-deps
 "$PYTHON_BIN" -m pip install pytest
 
