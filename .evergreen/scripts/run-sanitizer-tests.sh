@@ -47,8 +47,7 @@ if [ ! -f "$RUNTIME_LIB" ]; then
   exit 1
 fi
 
-"$PYTHON_BIN" -m pip install "hatchling>1.24" "setuptools>=65.0" "hatch-requirements-txt>=0.4.1"
-"$PYTHON_BIN" -m pip install -e . --no-build-isolation --force-reinstall --no-deps
+"$PYTHON_BIN" -m pip install -e . --force-reinstall --no-deps
 "$PYTHON_BIN" -m pip install pytest
 
 LOG_FILE=$(mktemp)
