@@ -51,7 +51,7 @@ fi
 uv venv --python "$UV_PYTHON" .sanitizer-venv
 VENV_PYTHON=.sanitizer-venv/bin/python3
 uv pip install --python "$VENV_PYTHON" -e . --reinstall --no-deps
-uv pip install --python "$VENV_PYTHON" pytest
+uv pip install --python "$VENV_PYTHON" -r requirements/test.txt
 
 LOG_FILE=$(mktemp)
 set +e
