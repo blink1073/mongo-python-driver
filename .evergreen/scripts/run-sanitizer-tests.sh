@@ -10,6 +10,10 @@ SANITIZER=${SANITIZER:?"SANITIZER must be set to 'asan' or 'tsan'"}
 PYTHON_BIN=${PYTHON_BIN:-python3}
 TEST_FILES=(test/test_bson.py test/test_raw_bson.py test/test_raw_bson_shared.py test/test_client.py)
 
+# Upgrade pip first so the isolated build environment is created by a modern pip
+# that correctly resolves the full dependency graph for build backends like hatchling.
+"$PYTHON_BIN" -m pip install --upgrade pip
+
 # A stale build/ can leave a .so linked against the wrong sanitizer's
 # runtime without a build error, so always start clean.
 rm -rf build
@@ -47,8 +51,6 @@ if [ ! -f "$RUNTIME_LIB" ]; then
   exit 1
 fi
 
-export PIP_CONSTRAINT="$(mktemp)"
-echo "packaging>=24.2" > "$PIP_CONSTRAINT"
 "$PYTHON_BIN" -m pip install -e . --force-reinstall --no-deps
 "$PYTHON_BIN" -m pip install pytest
 
