@@ -105,10 +105,6 @@ class MonitorBase:
         open() restarts the monitor after closing.
         """
         self.gc_safe_close()
-        # Wait briefly for the background task to actually stop before
-        # returning, so callers don't race with it while it may still be
-        # using a checked-out connection.
-        await self._executor.join(1)
 
     async def join(self) -> None:
         """Wait for the monitor to stop."""
@@ -196,9 +192,14 @@ class Monitor(MonitorBase):
     async def close(self) -> None:
         self.gc_safe_close()
         await self._rtt_monitor.close()
-        # Wait briefly for the background task to actually stop before
-        # resetting the pool, so we don't race with it while it may still
-        # be using a checked-out connection.
+        # Wake the executor so it notices the stop flag on its next sleep
+        # check, then wait briefly for the background task to actually stop
+        # before resetting the pool, so we don't race with it while it may
+        # still be using a checked-out connection. This join is a bounded
+        # backstop: if the task hasn't stopped by the timeout, the
+        # generation-based deferred close below still closes the socket
+        # once it's checked in.
+        self._executor.wake()
         await self._executor.join(1)
         # Increment the generation and maybe close the socket. If the executor
         # thread has the socket checked out, it will be closed when checked in.
@@ -412,9 +413,14 @@ class _RttMonitor(MonitorBase):
 
     async def close(self) -> None:
         self.gc_safe_close()
-        # Wait briefly for the background task to actually stop before
-        # resetting the pool, so we don't race with it while it may still
-        # be using a checked-out connection.
+        # Wake the executor so it notices the stop flag on its next sleep
+        # check, then wait briefly for the background task to actually stop
+        # before resetting the pool, so we don't race with it while it may
+        # still be using a checked-out connection. This join is a bounded
+        # backstop: if the task hasn't stopped by the timeout, the
+        # generation-based deferred close below still closes the socket
+        # once it's checked in.
+        self._executor.wake()
         await self._executor.join(1)
         # Increment the generation and maybe close the socket. If the executor
         # thread has the socket checked out, it will be closed when checked in.
