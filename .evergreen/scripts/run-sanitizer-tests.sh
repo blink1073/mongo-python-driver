@@ -42,6 +42,11 @@ case "$SANITIZER" in
     ;;
 esac
 
+if [ ! -f "$RUNTIME_LIB" ]; then
+  echo "Could not locate the $SANITIZER runtime library (got: $RUNTIME_LIB). Is the matching sanitizer runtime package installed?" >&2
+  exit 1
+fi
+
 "$PYTHON_BIN" -m pip install -e . --no-build-isolation --force-reinstall --no-deps
 "$PYTHON_BIN" -m pip install pytest
 
