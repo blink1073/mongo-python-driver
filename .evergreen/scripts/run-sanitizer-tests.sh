@@ -66,6 +66,16 @@ case "$SANITIZER" in
     # hosts may not permit it, so this is best effort.
     sudo sysctl -w vm.mmap_rnd_bits=28 || true
 
+    # Building CPython from source needs its usual dev dependencies —
+    # OpenSSL headers in particular, since pip needs a working ssl module
+    # to reach PyPI for the installs below. Best effort: if apt-get isn't
+    # available or permitted, the ssl-module check further down will warn
+    # instead of silently failing the pip installs.
+    sudo apt-get update -qq || true
+    sudo apt-get install -y --no-install-recommends \
+      build-essential libssl-dev zlib1g-dev libbz2-dev libffi-dev \
+      libreadline-dev libsqlite3-dev liblzma-dev || true
+
     CPYTHON_INSTALL_ABS="$(pwd)/$CPYTHON_INSTALL"
     git clone --depth 1 --branch "$CPYTHON_TAG" https://github.com/python/cpython.git "$CPYTHON_SRC"
     # Flags mirror CPython's own TSan CI job (.github/workflows/reusable-san.yml).
