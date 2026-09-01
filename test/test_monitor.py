@@ -124,8 +124,29 @@ class TestMonitor(IntegrationTest):
 
         client.close()
 
+        # close() drains the deferred-join queue after releasing the
+        # topology lock, so every monitor it closed has been joined.
+        self.assertEqual(client._topology._monitor_tasks, [])
         self.assertFalse(thread_alive(monitor._executor))
         self.assertFalse(thread_alive(monitor._rtt_monitor._executor))
+
+    @client_context.require_async
+    def test_close_stops_monitor_task(self):
+        """PYTHON-6048: the async counterpart of
+        test_close_stops_monitor_thread.
+        """
+        client = self.create_client()
+        server = next(iter(client._topology._servers.values()))
+        monitor = server._monitor
+
+        self.assertIsNotNone(monitor._executor._task)
+        self.assertFalse(monitor._executor._task.done())
+
+        client.close()
+
+        self.assertEqual(client._topology._monitor_tasks, [])
+        self.assertTrue(monitor._executor._task.done())
+        self.assertTrue(monitor._rtt_monitor._executor._task.done())
 
     @client_context.require_sync
     def test_no_thread_start_runtime_err_on_shutdown(self):
