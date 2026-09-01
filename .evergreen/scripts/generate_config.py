@@ -680,7 +680,18 @@ def create_sanitizer_tasks():
             tags.append("free-threaded")
         test_func = FunctionCall(func="run sanitizer tests", vars=test_vars)
         name = f"test-sanitizer-{sanitizer}"
-        tasks.append(EvgTask(name=name, tags=tags, commands=[server_func, test_func]))
+        # TSan builds a fully instrumented free-threaded CPython from source
+        # before it can run anything, which does not fit in the project-wide
+        # 60 minute exec timeout.
+        exec_timeout_secs = 7200 if sanitizer == "tsan" else None
+        tasks.append(
+            EvgTask(
+                name=name,
+                tags=tags,
+                exec_timeout_secs=exec_timeout_secs,
+                commands=[server_func, test_func],
+            )
+        )
     return tasks
 
 

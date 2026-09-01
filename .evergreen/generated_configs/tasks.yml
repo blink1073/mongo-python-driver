@@ -2920,6 +2920,7 @@ tasks:
         vars:
           SANITIZER: tsan
           UV_PYTHON: 3.14t
+    exec_timeout_secs: 7200
     tags: [sanitizer, pr, free-threaded]
 
   # Search index tests
