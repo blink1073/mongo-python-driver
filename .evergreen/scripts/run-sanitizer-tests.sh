@@ -66,18 +66,40 @@ case "$SANITIZER" in
     # hosts may not permit it, so this is best effort.
     sudo sysctl -w vm.mmap_rnd_bits=28 || true
 
-    # Building CPython from source needs its usual dev dependencies —
-    # OpenSSL headers in particular, since pip needs a working ssl module
-    # to reach PyPI for the installs below. Best effort: if apt-get isn't
-    # available or permitted, the ssl-module check further down will warn
-    # instead of silently failing the pip installs.
+    # Building CPython from source needs its usual dev dependencies. Best
+    # effort: if apt-get isn't available or permitted, the OpenSSL header
+    # check below still catches the case that breaks the pip installs.
     sudo apt-get update -qq || true
+    # Package list matches CPython's own Doc/using/unix.rst and
+    # Tools/scripts/posix-deps-apt.sh, so the optional extension modules
+    # (_zstd, _gdbm, _tkinter, ...) build instead of silently skipping.
     sudo apt-get install -y --no-install-recommends \
       build-essential libssl-dev zlib1g-dev libbz2-dev libffi-dev \
-      libreadline-dev libsqlite3-dev liblzma-dev || true
+      libreadline-dev libsqlite3-dev liblzma-dev pkg-config libb2-dev \
+      libgdbm-dev libgdbm-compat-dev libncurses5-dev libzstd-dev tk-dev \
+      uuid-dev curl || true
+
+    # Fail here rather than after the 20-30 minute build: without these
+    # headers _ssl won't build and the pip installs below cannot reach PyPI.
+    if [ ! -f /usr/include/openssl/ssl.h ]; then
+      echo "OpenSSL development headers not found at /usr/include/openssl/ssl.h after apt-get install. pip needs a working ssl module to reach PyPI. Aborting before the CPython build." >&2
+      exit 1
+    fi
 
     CPYTHON_INSTALL_ABS="$(pwd)/$CPYTHON_INSTALL"
     git clone --depth 1 --branch "$CPYTHON_TAG" https://github.com/python/cpython.git "$CPYTHON_SRC"
+
+    # TSan accepts one suppressions file, so concatenate the pinned tag's own
+    # suppressions with this repo's additions. The 3.14 branch's file is not
+    # empty: even a fully instrumented build needs its ~24 entries.
+    CPYTHON_SUPPRESSIONS="$CPYTHON_SRC/Tools/tsan/suppressions_free_threading.txt"
+    if [ ! -f "$CPYTHON_SUPPRESSIONS" ]; then
+      echo "Expected CPython's own TSan suppressions at $CPYTHON_SUPPRESSIONS, but the file is missing from the $CPYTHON_TAG source tree." >&2
+      exit 1
+    fi
+    COMBINED_SUPPRESSIONS="$(pwd)/.tsan-suppressions-combined.txt"
+    cat "$CPYTHON_SUPPRESSIONS" .evergreen/tsan-suppressions.txt > "$COMBINED_SUPPRESSIONS"
+
     # Flags mirror CPython's own TSan CI job (.github/workflows/reusable-san.yml).
     # CFLAGS/LDFLAGS are deliberately left unset here: --with-thread-sanitizer
     # and --with-pydebug already supply the right flags, and overriding them
@@ -98,10 +120,10 @@ case "$SANITIZER" in
       make install
     )
 
-    # Free-threaded builds install as pythonX.Yt; fall back to python3 in case
-    # a future release drops the suffix.
+    # --disable-gil adds a "t" suffix and --with-pydebug adds a "d", so this
+    # build installs as pythonX.Ytd. bin/python3 is the last-resort fallback.
     TSAN_PYTHON=""
-    for candidate in "$CPYTHON_INSTALL"/bin/python3.*t "$CPYTHON_INSTALL"/bin/python3; do
+    for candidate in "$CPYTHON_INSTALL"/bin/python3.*td "$CPYTHON_INSTALL"/bin/python3.*t "$CPYTHON_INSTALL"/bin/python3; do
       if [ -x "$candidate" ]; then
         TSAN_PYTHON="$candidate"
         break
@@ -125,13 +147,13 @@ case "$SANITIZER" in
     # hatchling's build dependencies itself.
     export CFLAGS="-fsanitize=thread -fno-omit-frame-pointer -g -O0"
     export LDFLAGS="-fsanitize=thread"
-    "$TSAN_PYTHON" -m ensurepip --upgrade
     "$TSAN_PYTHON" -m pip install -e .
     "$TSAN_PYTHON" -m pip install -r requirements/test.txt
 
     # Set after the build: halt_on_error=1 would abort the CPython build and
     # the installs on any diagnostic raised by those tools themselves.
-    TSAN_OPTIONS="halt_on_error=1:suppressions=$(pwd)/.evergreen/tsan-suppressions.txt"
+    # handle_segv=0 matches CPython's own TSan CI job.
+    TSAN_OPTIONS="halt_on_error=1:handle_segv=0:suppressions=$COMBINED_SUPPRESSIONS"
     export TSAN_OPTIONS
 
     # No LD_PRELOAD: both the interpreter and the extensions link the TSan

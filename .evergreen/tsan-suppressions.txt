@@ -1,17 +1,15 @@
-# ThreadSanitizer suppressions for this driver's TSan CI task.
+# PyMongo-specific ThreadSanitizer suppressions. Currently none are needed.
 #
-# As of PYTHON-6048, the TSan task builds a fully TSan-instrumented
-# free-threaded CPython interpreter from source (matching CPython's own
-# CI: https://github.com/python/cpython/blob/main/.github/workflows/reusable-san.yml),
-# rather than LD_PRELOADing libtsan.so onto a prebuilt, uninstrumented
-# interpreter. That earlier approach produced several false positives
-# inside CPython's own free-threading internals (biased refcounting,
-# thread-local bytecode caching, deferred-free reclamation, etc.)
-# because TSan cannot see synchronization in code that wasn't compiled
-# with -fsanitize=thread. With full instrumentation, those specific
-# findings should not recur — matching CPython's own
-# Tools/tsan/suppressions_free_threading.txt, which is also kept empty
-# for the same reason. This file is kept as a placeholder for any
-# genuine future finding that needs a narrow, justified suppression.
+# .evergreen/scripts/run-sanitizer-tests.sh concatenates this file with the
+# pinned CPython tag's own Tools/tsan/suppressions_free_threading.txt and
+# passes the result as TSan's single suppressions= path. That upstream file
+# is not empty on the 3.14 branch: it carries roughly two dozen entries
+# (assign_version_tag, update_one_slot, _PyFrame_GetCode, rangeiter_next,
+# list_ass_slice_lock_held, PyObject_Realloc, mi_block_set_nextx,
+# pthread_create, and others) that CPython's own fully instrumented TSan CI
+# job needs to run clean. Do not duplicate those here.
+#
+# Add an entry below only for a race in PyMongo's own C extensions that has
+# been investigated and judged benign, with a comment saying why.
 #
 # Reference: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions

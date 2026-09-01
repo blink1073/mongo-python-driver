@@ -46,3 +46,9 @@ xunit-results/
 coverage.xml
 server.log
 .coverage
+
+# sanitizer test task scratch (see .evergreen/scripts/run-sanitizer-tests.sh)
+.sanitizer-venv/
+.tsan-cpython-src/
+.tsan-cpython-install/
+.tsan-suppressions-combined.txt
