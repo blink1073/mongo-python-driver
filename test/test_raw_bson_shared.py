@@ -17,6 +17,7 @@ import copy
 import gc
 import pickle
 import sys
+import threading
 import unittest
 import uuid
 
@@ -39,6 +40,20 @@ TEST_RAW_BSON = (
     b"\x00\x00\x00Sherlock\x00\x04addresses\x00&\x00\x00\x00\x030\x00\x1e"
     b"\x00\x00\x00\x02street\x00\r\x00\x00\x00Baker Street\x00\x00\x00\x00"
 )
+
+N_THREADS = 16
+N_ITERS = 200
+BIG_PAYLOAD = "x" * 8000
+
+
+def _make_shared_doc_bytes() -> bytes:
+    return encode(
+        {
+            "small": {"n": 1},
+            "big": {"payload": BIG_PAYLOAD, "n": 42},
+            "arr": [{"payload": BIG_PAYLOAD, "idx": i} for i in range(3)],
+        }
+    )
 
 
 class _TaggedRawBSONDocument(RawBSONDocument):
@@ -319,6 +334,83 @@ class TestRawBSONDocument(UnitTest):
 
         self.assertEqual(decode(encode(doc)), {"value": DBRef("test", "id")})
         self.assertEqual(doc["value"].raw, raw_encoded)
+
+
+class TestRawBSONDocumentConcurrency(unittest.TestCase):
+    """Concurrency and buffer-lifetime regression tests for zero-copy
+    RawBSONDocument, intended to also run under ASan/UBSan/TSan in CI
+    (see .evergreen/scripts/run-sanitizer-tests.sh)."""
+
+    def test_concurrent_reads_on_shared_document(self):
+        doc_bytes = _make_shared_doc_bytes()
+        shared_doc = RawBSONDocument(doc_bytes)
+
+        # Confirm we're actually exercising the zero-copy memoryview path,
+        # not accidentally testing a byte-copy fallback.
+        big_check = shared_doc["big"]
+        self.assertIsInstance(big_check.raw, memoryview)
+        self.assertTrue(big_check.raw.readonly)
+
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+
+        def worker() -> None:
+            try:
+                for _ in range(N_ITERS):
+                    big = shared_doc["big"]
+                    assert big["payload"] == BIG_PAYLOAD
+                    assert big["n"] == 42
+                    assert isinstance(big.raw, memoryview)
+
+                    arr = shared_doc["arr"]
+                    for j, item in enumerate(arr):
+                        assert item["idx"] == j
+                        assert item["payload"] == BIG_PAYLOAD
+
+                    small = shared_doc["small"]
+                    assert small["n"] == 1
+
+                    # Re-encodes a view-backed subdocument while other
+                    # threads may be reading the same underlying buffer.
+                    reencoded = encode({"again": big})
+                    assert isinstance(reencoded, bytes)
+
+                    multi = decode_all(doc_bytes * 2, DEFAULT_RAW_BSON_OPTIONS)
+                    assert len(multi) == 2
+                    for d in multi:
+                        assert isinstance(d["big"].raw, memoryview)
+            except BaseException as exc:
+                with errors_lock:
+                    errors.append(exc)
+                raise
+
+        threads = [threading.Thread(target=worker) for _ in range(N_THREADS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+
+    def test_buffer_survives_after_source_bytes_are_dropped(self):
+        # Buffer-lifetime edge case: slice a bytearray, wrap it in a
+        # RawBSONDocument, then mutate/drop the original backing buffer to
+        # make sure the document doesn't hold a dangling view.
+        encoded = _make_shared_doc_bytes()
+        for _ in range(50):
+            buf = bytearray(encoded) + b"\x00" * 10
+            view = memoryview(buf)[: len(encoded)]
+            raw = RawBSONDocument(view)
+            _ = raw["big"]
+            _ = dict(raw["small"])
+            _ = list(raw["arr"])
+            copied = dict(raw)
+            del raw
+            del view
+            buf[:] = b"\xff" * len(buf)
+            del buf
+            gc.collect()
+            self.assertEqual(copied["small"]["n"], 1)
 
 
 if __name__ == "__main__":
