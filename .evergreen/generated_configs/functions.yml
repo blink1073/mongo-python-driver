@@ -85,6 +85,20 @@ functions:
       params:
         directory: src
 
+  # Run sanitizer tests
+  run sanitizer tests:
+    - command: subprocess.exec
+      params:
+        binary: bash
+        args:
+          - .evergreen/just.sh
+          - run-sanitizer-tests
+        working_dir: src
+        include_expansions_in_env:
+          - SANITIZER
+          - UV_PYTHON
+      type: test
+
   # Run server
   run server:
     - command: subprocess.exec

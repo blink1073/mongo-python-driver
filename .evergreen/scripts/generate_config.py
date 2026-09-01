@@ -341,6 +341,13 @@ def create_mod_wsgi_variants():
     return [create_variant(tasks, display_name, host=host, expansions=expansions)]
 
 
+def create_sanitizer_variants():
+    host = HOSTS["ubuntu22"]
+    tasks = ["test-sanitizer-asan", "test-sanitizer-tsan"]
+    display_name = get_variant_name("Sanitizers", host)
+    return [create_variant(tasks, display_name, host=host, tags=["pr"])]
+
+
 def create_disable_test_commands_variants():
     host = DEFAULT_HOST
     expansions = dict(AUTH="auth", SSL="ssl", DISABLE_TEST_COMMANDS="1")
@@ -655,6 +662,24 @@ def create_no_toolchain_tasks():
         test_vars = expansions.copy()
         test_vars["TEST_NAME"] = f"default_{sync}"
         test_func = FunctionCall(func="run tests", vars=test_vars)
+        tasks.append(EvgTask(name=name, tags=tags, commands=[server_func, test_func]))
+    return tasks
+
+
+def create_sanitizer_tasks():
+    tasks = []
+    # (sanitizer, free-threaded UV_PYTHON or None)
+    configs = [("asan", None), ("tsan", "3.14t")]
+    for sanitizer, python in configs:
+        tags = ["sanitizer", "pr"]
+        server_vars = dict(VERSION="latest", TOPOLOGY="standalone", AUTH="noauth", SSL="nossl")
+        server_func = FunctionCall(func="run server", vars=server_vars)
+        test_vars = dict(SANITIZER=sanitizer)
+        if python:
+            test_vars["UV_PYTHON"] = python
+            tags.append("free-threaded")
+        test_func = FunctionCall(func="run sanitizer tests", vars=test_vars)
+        name = f"test-sanitizer-{sanitizer}"
         tasks.append(EvgTask(name=name, tags=tags, commands=[server_func, test_func]))
     return tasks
 
@@ -1313,6 +1338,13 @@ def create_run_tests_func():
     setup_cmd = get_subprocess_exec(include_expansions_in_env=includes, args=args)
     test_cmd = get_subprocess_exec(args=[".evergreen/just.sh", "run-tests"])
     return "run tests", [setup_cmd, test_cmd]
+
+
+def create_run_sanitizer_tests_func():
+    includes = ["SANITIZER", "UV_PYTHON"]
+    args = [".evergreen/just.sh", "run-sanitizer-tests"]
+    sub_cmd = get_subprocess_exec(include_expansions_in_env=includes, args=args)
+    return "run sanitizer tests", [sub_cmd]
 
 
 def create_test_numpy_func():
