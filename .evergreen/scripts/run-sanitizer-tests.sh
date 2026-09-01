@@ -37,7 +37,8 @@ case "$SANITIZER" in
     export CFLAGS="-fsanitize=thread -fno-omit-frame-pointer -g -O0"
     export LDFLAGS="-fsanitize=thread"
     RUNTIME_LIB=$("$CC" -print-file-name=libtsan.so)
-    export TSAN_OPTIONS="halt_on_error=1:suppressions=$(pwd)/.evergreen/tsan-suppressions.txt"
+    TSAN_OPTIONS="halt_on_error=1:suppressions=$(pwd)/.evergreen/tsan-suppressions.txt"
+    export TSAN_OPTIONS
     ;;
   *)
     echo "Unknown SANITIZER: $SANITIZER (expected 'asan' or 'tsan')" >&2
