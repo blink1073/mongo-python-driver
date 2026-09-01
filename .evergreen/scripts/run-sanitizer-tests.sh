@@ -57,7 +57,7 @@ uv pip install --python "$VENV_PYTHON" -r requirements/test.txt
 
 LOG_FILE=$(mktemp)
 set +e
-LD_PRELOAD="$RUNTIME_LIB" "$VENV_PYTHON" -m pytest -v "${TEST_FILES[@]}" 2>&1 | tee "$LOG_FILE"
+LD_PRELOAD="$RUNTIME_LIB" "$VENV_PYTHON" -m pytest -v --capture=no "${TEST_FILES[@]}" 2>&1 | tee "$LOG_FILE"
 PYTEST_STATUS=${PIPESTATUS[0]}
 set -e
 
