@@ -20,6 +20,7 @@ import asyncio
 import gc
 import subprocess
 import sys
+import time
 import warnings
 from functools import partial
 
@@ -99,6 +100,32 @@ class TestMonitor(IntegrationTest):
 
         for executor in executors:
             wait_until(lambda: executor._stopped, f"closed executor: {executor._name}", timeout=5)
+
+    @client_context.require_sync
+    def test_close_stops_monitor_thread(self):
+        """PYTHON-6048: close() must join the monitor thread before
+        returning, so callers don't race with it while it may still be
+        reading from a socket that close() is about to tear down.
+        """
+        client = self.create_client()
+        server = next(iter(client._topology._servers.values()))
+        monitor = server._monitor
+
+        def thread_alive(executor):
+            try:
+                return executor._thread is not None and executor._thread.is_alive()
+            except ReferenceError:
+                return False
+
+        deadline = time.monotonic() + 10
+        while not thread_alive(monitor._executor) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(thread_alive(monitor._executor), "monitor thread never started")
+
+        client.close()
+
+        self.assertFalse(thread_alive(monitor._executor))
+        self.assertFalse(thread_alive(monitor._rtt_monitor._executor))
 
     @client_context.require_sync
     def test_no_thread_start_runtime_err_on_shutdown(self):

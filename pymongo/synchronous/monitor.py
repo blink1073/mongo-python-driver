@@ -105,6 +105,10 @@ class MonitorBase:
         open() restarts the monitor after closing.
         """
         self.gc_safe_close()
+        # Wait briefly for the background task to actually stop before
+        # returning, so callers don't race with it while it may still be
+        # using a checked-out connection.
+        self._executor.join(1)
 
     def join(self) -> None:
         """Wait for the monitor to stop."""
@@ -190,6 +194,10 @@ class Monitor(MonitorBase):
     def close(self) -> None:
         self.gc_safe_close()
         self._rtt_monitor.close()
+        # Wait briefly for the background task to actually stop before
+        # resetting the pool, so we don't race with it while it may still
+        # be using a checked-out connection.
+        self._executor.join(1)
         # Increment the generation and maybe close the socket. If the executor
         # thread has the socket checked out, it will be closed when checked in.
         self._reset_connection()
@@ -402,6 +410,10 @@ class _RttMonitor(MonitorBase):
 
     def close(self) -> None:
         self.gc_safe_close()
+        # Wait briefly for the background task to actually stop before
+        # resetting the pool, so we don't race with it while it may still
+        # be using a checked-out connection.
+        self._executor.join(1)
         # Increment the generation and maybe close the socket. If the executor
         # thread has the socket checked out, it will be closed when checked in.
         self._pool.reset()
