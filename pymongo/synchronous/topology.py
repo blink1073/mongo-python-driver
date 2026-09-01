@@ -934,7 +934,9 @@ class Topology:
         """Join monitors closed earlier while the topology lock was held.
 
         Always call this with the lock released: a monitor being joined may
-        itself be blocked acquiring the lock.
+        itself be blocked acquiring the lock. Per-monitor join timeout: up to
+        1s for RttMonitor/SrvMonitor, up to 2s for Monitor (sequential joins
+        of executor and rtt_monitor). Called from select_servers() and close().
         """
         tasks = []
         try:
