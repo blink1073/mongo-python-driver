@@ -50,6 +50,11 @@ PyMongo 4.18 brings a number of changes including:
 - Fixed a bug on Windows, and on macOS when using PyOpenSSL, where
   ``SSL_CERT_FILE``/``SSL_CERT_DIR`` were merged with, rather than replacing,
   the OS/certifi certificate store.
+- Fixed a race between a server monitor's background thread and connection
+  pool teardown during
+  :meth:`~pymongo.synchronous.mongo_client.MongoClient.close`. Closing a
+  client now waits (with a bounded timeout) for its monitor threads to stop
+  before returning, adding up to a couple hundred milliseconds to ``close()``.
 - Added general availability support for Queryable Encryption prefix, suffix,
   and substring queries against MongoDB 9.0+. These queries require
   libmongocrypt 1.20.0 or later:

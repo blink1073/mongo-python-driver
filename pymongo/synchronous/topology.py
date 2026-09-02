@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import queue
 import random
@@ -241,8 +240,9 @@ class Topology:
         else:
             server_timeout = server_selection_timeout
 
-        # Cleanup any completed monitor tasks safely
-        if not _IS_SYNC and self._monitor_tasks:
+        # Join any monitors closed under the topology lock. Doing it here,
+        # outside the lock, keeps the join off the paths that hold it.
+        if self._monitor_tasks:
             self.cleanup_monitors()
 
         with self._lock:
@@ -454,8 +454,7 @@ class Topology:
             and self._description.topology_type not in SRV_POLLING_TOPOLOGIES
         ):
             self._srv_monitor.close()
-            if not _IS_SYNC:
-                self._monitor_tasks.append(self._srv_monitor)
+            self._monitor_tasks.append(self._srv_monitor)
 
         # Wake anything waiting in select_servers().
         self._condition.notify_all()
@@ -612,8 +611,7 @@ class Topology:
             old_td = self._description
             for server in self._servers.values():
                 server.close()
-                if not _IS_SYNC:
-                    self._monitor_tasks.append(server._monitor)
+                self._monitor_tasks.append(server._monitor)
 
             # Mark all servers Unknown.
             self._description = self._description.reset()
@@ -624,11 +622,13 @@ class Topology:
             # Stop SRV polling thread.
             if self._srv_monitor:
                 self._srv_monitor.close()
-                if not _IS_SYNC:
-                    self._monitor_tasks.append(self._srv_monitor)
+                self._monitor_tasks.append(self._srv_monitor)
 
             self._opened = False
             self._closed = True
+
+        # Join the monitors we just closed, now that the lock is released.
+        self.cleanup_monitors()
 
         # Publish only after releasing the lock.
         if self._sdam._publish_tp:
@@ -845,8 +845,7 @@ class Topology:
         for address, server in list(self._servers.items()):
             if not self._description.has_server(address):
                 server.close()
-                if not _IS_SYNC:
-                    self._monitor_tasks.append(server._monitor)
+                self._monitor_tasks.append(server._monitor)
                 self._servers.pop(address)
 
     def _create_pool_for_server(self, address: _Address) -> Pool:
@@ -932,13 +931,25 @@ class Topology:
                 return ",".join(str(server.error) for server in servers if server.error)
 
     def cleanup_monitors(self) -> None:
+        """Join monitors closed earlier while the topology lock was held.
+
+        Always call this with the lock released: a monitor being joined may
+        itself be blocked acquiring the lock. Per-monitor join timeout: up to
+        1s for RttMonitor/SrvMonitor, up to 2s for Monitor (sequential joins
+        of executor and rtt_monitor). Called from select_servers() and close().
+        """
         tasks = []
         try:
             while self._monitor_tasks:
                 tasks.append(self._monitor_tasks.pop())
         except IndexError:
             pass
-        asyncio.gather(*[t.join() for t in tasks], return_exceptions=True)  # type: ignore[func-returns-value]
+        for t in tasks:
+            try:
+                t.join(1)
+            except Exception:  # noqa: S110
+                # One monitor failing to stop must not block the rest.
+                pass
 
     def __repr__(self) -> str:
         msg = ""
