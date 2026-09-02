@@ -66,23 +66,10 @@ case "$SANITIZER" in
     # hosts may not permit it, so this is best effort.
     sudo sysctl -w vm.mmap_rnd_bits=28 || true
 
-    # Building CPython from source needs its usual dev dependencies. Best
-    # effort: if apt-get isn't available or permitted, the OpenSSL header
-    # check below still catches the case that breaks the pip installs.
-    sudo apt-get update -qq || true
-    # Package list matches CPython's own Doc/using/unix.rst and
-    # Tools/scripts/posix-deps-apt.sh, so the optional extension modules
-    # (_zstd, _gdbm, _tkinter, ...) build instead of silently skipping.
-    sudo apt-get install -y --no-install-recommends \
-      build-essential libssl-dev zlib1g-dev libbz2-dev libffi-dev \
-      libreadline-dev libsqlite3-dev liblzma-dev pkg-config libb2-dev \
-      libgdbm-dev libgdbm-compat-dev libncurses5-dev libzstd-dev tk-dev \
-      uuid-dev curl || true
-
     # Fail here rather than after the 20-30 minute build: without these
     # headers _ssl won't build and the pip installs below cannot reach PyPI.
     if [ ! -f /usr/include/openssl/ssl.h ]; then
-      echo "OpenSSL development headers not found at /usr/include/openssl/ssl.h after apt-get install. pip needs a working ssl module to reach PyPI. Aborting before the CPython build." >&2
+      echo "OpenSSL development headers not found at /usr/include/openssl/ssl.h. This host has no way to install them: apt-get isn't available here, so building CPython with a working ssl module isn't possible. Aborting before the CPython build." >&2
       exit 1
     fi
 
