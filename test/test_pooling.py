@@ -629,7 +629,8 @@ class TestPooling(_TestPoolingBase):
         with pool.checkout():
             pass
 
-        # Make the fast path's slot check fail so the slow path runs.
+        # requests counts slots in use, so setting it to max_pool_size makes
+        # the fast path's slot check fail and the slow path run instead.
         pool.requests = pool.max_pool_size
 
         real_cond_wait = _cond_wait
