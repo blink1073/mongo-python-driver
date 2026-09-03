@@ -6,7 +6,9 @@ Changes in Version 4.18.0 (2026/XX/XX)
 
 PyMongo 4.18 brings a number of changes including:
 
+- Dropped support for MongoDB 4.2.
 - Added support for MongoDB 9.0.
+- PyPy support is deprecated and will be removed in a future release.
 - Improved TLS connection performance by reusing TLS sessions across connections
   to the same server, avoiding a full handshake on each new connection.
   Session resumption is supported on all Python versions for synchronous clients
@@ -29,6 +31,18 @@ PyMongo 4.18 brings a number of changes including:
   attempts, so consumers can correlate a retried operation's events. As a
   result, ``operation_id`` is no longer equal to the per-attempt ``request_id``
   for these operations.
+- Added validation of OP_COMPRESSED decompressed message size against
+  ``max_message_size`` to prevent memory exhaustion from maliciously crafted
+  compressed server responses.
+- Improved the performance and memory usage of decoding large documents to
+  :class:`~bson.raw_bson.RawBSONDocument`. Documents and subdocuments that are 4KB or greater
+  and decoded from an immutable buffer are now exposed as read-only :class:`memoryview`
+  slices instead of :class:`bytes` copies. Documents decoded from mutable buffers such as a
+  :class:`bytearray` are always :class:`bytes` copies.
+- :func:`bson.get_data_and_view` now returns a view of a private :class:`bytes` copy
+  for buffer-protocol inputs other than :class:`bytes` or :class:`bytearray`.
+- Improved the performance of lazily decoding a
+  :class:`~bson.raw_bson.RawBSONDocument` when the C extension is available.
 - Fixed a potential out-of-bounds read in the C extension when decoding an
   array of BSON documents. An embedded document whose declared length exceeds
   the bytes remaining in the array now raises
@@ -39,6 +53,26 @@ PyMongo 4.18 brings a number of changes including:
 - Fixed a bug on Windows, and on macOS when using PyOpenSSL, where
   ``SSL_CERT_FILE``/``SSL_CERT_DIR`` were merged with, rather than replacing,
   the OS/certifi certificate store.
+- Added general availability support for Queryable Encryption prefix, suffix,
+  and substring queries against MongoDB 9.0+. These queries require
+  libmongocrypt 1.20.0 or later:
+
+  - Added :attr:`~pymongo.encryption.Algorithm.STRING` and
+    :class:`~pymongo.encryption_options.StringOpts`, replacing
+    ``Algorithm.TEXTPREVIEW`` and ``TextOpts``, which are now deprecated.
+  - Added :attr:`~pymongo.encryption.QueryType.PREFIX`,
+    :attr:`~pymongo.encryption.QueryType.SUFFIX`, and
+    :attr:`~pymongo.encryption.QueryType.SUBSTRING`. The corresponding
+    ``PREFIXPREVIEW``, ``SUFFIXPREVIEW``, and ``SUBSTRINGPREVIEW`` query types
+    remain for experimental use with MongoDB versions before 9.0.
+  - Added the ``string_opts`` parameter to
+    :meth:`~pymongo.encryption.ClientEncryption.encrypt` and
+    :meth:`~pymongo.asynchronous.encryption.AsyncClientEncryption.encrypt`,
+    deprecating ``text_opts``. pymongocrypt added ``text_opts`` in 1.16 and
+    renamed it to ``string_opts`` in 1.19, and accepts only one of the two
+    names per release, so passing ``text_opts`` with pymongocrypt 1.19 or
+    later, ``string_opts`` with pymongocrypt 1.16 through 1.18, or both names
+    at once, raises :exc:`~pymongo.errors.ConfigurationError`.
 - Aggregation helpers now raise :exc:`~pymongo.errors.ConfigurationError` when
   passed an ``aggregate`` or ``pipeline`` keyword argument. Previously these
   keys silently replaced the target namespace and pipeline of the generated
