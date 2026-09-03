@@ -976,9 +976,9 @@ class Pool:
             deadline = None
 
         conn = None
+        # Set each flag right after its own increment, narrowing an
+        # interrupt's window to at most one statement.
         op_count_incremented = False
-        # Set each flag immediately after its own increment, so an interrupt
-        # can leave a counter unrecorded across at most one statement.
         requests_incremented = False
         active_sockets_incremented = False
         # Invariant: any site inside the `try` below that emits a checkout
@@ -1075,7 +1075,7 @@ class Pool:
                         self.active_sockets -= 1
                     if requests_incremented:
                         self.requests -= 1
-                        # Notify only when a slot was actually released.
+                        # Notify only when a slot was released.
                         self.size_cond.notify()
 
             if not emitted_event:
