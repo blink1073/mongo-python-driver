@@ -407,8 +407,8 @@ class TestPooling(_TestPoolingBase):
         )
 
     def test_wait_queue_timeout_does_not_leak_operation_count(self):
-        # A checkout that fails while waiting for a pool slot must not leave
-        # any counter incremented. It must emit exactly one
+        # A checkout that fails while waiting for a slot must not leave any
+        # counter incremented. It must emit exactly one
         # ConnectionCheckOutFailedEvent, with reason TIMEOUT.
         wait_queue_timeout = 1  # Seconds
         listener = CMAPListener()
@@ -466,10 +466,10 @@ class TestPooling(_TestPoolingBase):
 
     def test_checkout_failed_event_is_emitted_under_the_pool_lock(self):
         # A failing readiness check must publish its
-        # ConnectionCheckOutFailedEvent while still holding the pool mutex, so
+        # ConnectionCheckOutFailedEvent while still holding the pool lock, so
         # that _reset()'s PoolClearedEvent is always recorded first
         # (PYTHON-3519). Listeners run synchronously inside the publish call,
-        # so this one sees whether the emitting code holds the mutex.
+        # so this one sees whether the emitting code holds the lock.
         locked_while_emitting = []
         pool_ref: list = []
 
@@ -492,7 +492,7 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(
             [True],
             locked_while_emitting,
-            "ConnectionCheckOutFailedEvent must be published while the pool mutex is held",
+            "ConnectionCheckOutFailedEvent must be published while the pool lock is held",
         )
 
     def test_checkout_failed_event_is_emitted_under_the_pool_lock_slow_path(self):
@@ -553,7 +553,7 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(
             [True],
             locked_while_emitting,
-            "ConnectionCheckOutFailedEvent must be published while the pool mutex is held",
+            "ConnectionCheckOutFailedEvent must be published while the pool lock is held",
         )
         # PYTHON-3519: the clear that caused the failure must be recorded first.
         self.assertEqual(
@@ -571,8 +571,8 @@ class TestPooling(_TestPoolingBase):
         # active_sockets bookkeeping in one critical section; splitting that
         # back apart would pass every other test in this file.
         #
-        # Two acquisitions are expected for a warm checkout: one for the
-        # bookkeeping, one to register the cancel context. size_cond and
+        # A warm checkout should acquire the lock twice: once for the
+        # bookkeeping, once to register the cancel context. size_cond and
         # _max_connecting_cond are separate objects, so this does not count
         # their blocks.
         pool = self.create_pool(max_pool_size=1)
