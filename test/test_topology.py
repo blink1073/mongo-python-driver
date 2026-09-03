@@ -984,9 +984,9 @@ class TestTopologyDescriptionImmutability(TopologyTest):
         barrier = threading.Barrier(6)
 
         def deprioritizing_worker():
-            # Without this, threading would print an unexpected exception (a
-            # BrokenBarrierError from the barrier timeout, say) and discard it,
-            # leaving errors empty and passing the test vacuously.
+            # Catch worker exceptions (a BrokenBarrierError from the barrier
+            # timeout, say) so they reach errors instead of being discarded,
+            # which would pass the test vacuously.
             try:
                 barrier.wait(timeout=30)
                 for _ in range(iterations):

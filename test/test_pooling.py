@@ -408,8 +408,8 @@ class TestPooling(_TestPoolingBase):
 
     def test_wait_queue_timeout_does_not_leak_operation_count(self):
         # A checkout that fails while waiting for a pool slot must not leave
-        # operation_count, requests, or active_sockets incremented, and must
-        # emit exactly one ConnectionCheckOutFailedEvent, with reason TIMEOUT.
+        # any counter incremented. It must emit exactly one
+        # ConnectionCheckOutFailedEvent, with reason TIMEOUT.
         wait_queue_timeout = 1  # Seconds
         listener = CMAPListener()
         pool = self.create_pool(
@@ -442,10 +442,9 @@ class TestPooling(_TestPoolingBase):
         self.assertEqual(pool.active_sockets, 0)
 
     def test_paused_pool_checkout_failure_does_not_leak_or_double_emit(self):
-        # A checkout that fails because the pool is paused must not leave
-        # operation_count, requests, or active_sockets incremented, and must
-        # emit exactly one ConnectionCheckOutFailedEvent. With no outstanding
-        # checkouts a slot is immediately available, so this exercises the
+        # A checkout that fails because the pool is paused must not leave any
+        # counter incremented, and must emit exactly one
+        # ConnectionCheckOutFailedEvent. A free slot means this exercises the
         # fast path's readiness check.
         listener = CMAPListener()
         pool = self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
@@ -497,10 +496,8 @@ class TestPooling(_TestPoolingBase):
         )
 
     def test_checkout_failed_event_is_emitted_under_the_pool_lock_slow_path(self):
-        # Same guarantee as the test above, for the slow path. That test
-        # pauses an idle pool, so only the fast path runs and a slow-path
-        # regression would not fail it. Here the only slot is taken, so the
-        # checkout blocks on size_cond and reset() wakes it.
+        # Same guarantee as the test above, for the slow path: the only slot
+        # is taken, so the checkout blocks on size_cond and reset() wakes it.
         locked_while_emitting = []
         pool_ref: list = []
 
