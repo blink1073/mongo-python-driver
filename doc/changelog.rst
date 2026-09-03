@@ -85,6 +85,25 @@ PyMongo 4.18 brings a number of changes including:
   :meth:`~pymongo.synchronous.database.Database.aggregate`, and
   :meth:`~pymongo.asynchronous.collection.AsyncCollection.list_search_indexes`
   and :meth:`~pymongo.synchronous.collection.Collection.list_search_indexes`.
+- Fixed ``client.primary`` raising ``IndexError``, and ``client.secondaries``
+  and ``client.arbiters`` returning stale results, after a retryable operation
+  deprioritized the primary.
+- **Breaking change**: removed the public ``TopologyDescription.candidate_servers``
+  attribute, which was added in PyMongo 4.16.0 and appeared in the 4.16 and
+  4.17 API documentation. Its value depended on which server-selection call
+  happened to run last, so it could not be relied on. Any code reading it must
+  be updated to use
+  :attr:`~pymongo.topology_description.TopologyDescription.known_servers`
+  instead.
+- Fixed a leak where every failed connection checkout permanently incremented
+  a pool's ``operation_count``. Because nothing short of a fork reset that
+  counter, a mongos that suffered a burst of checkout failures looked
+  permanently busier than its peers and was progressively avoided by server
+  selection for the remaining life of the client. As part of this fix, a
+  checkout cancelled while waiting for a pool slot now emits a
+  ``ConnectionCheckOutFailedEvent``; previously that path emitted nothing.
+- Reduced the number of lock acquisitions on the connection checkout fast
+  path.
 
 Changes in Version 4.17.0 (2026/04/20)
 --------------------------------------
