@@ -28,9 +28,11 @@ if [ -f $HERE/env.sh ]; then
   . $HERE/env.sh
 fi
 
-# When uv cannot provide the requested version (for example, a pre-release uv
-# has not indexed yet), fetch it from python-build-standalone's latest release
-# and put it on the path.
+# Only a bare version (e.g. "3.15") can trigger a download. setup-uv-python.sh
+# turns toolchain and system Pythons into absolute paths, which the checks
+# below skip, so a download means the version is missing from both. Try uv's
+# managed install first, and when uv has no build for it, such as a
+# pre-release, fall back to python-build-standalone's latest release.
 if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" != /* ]] && [[ "$UV_PYTHON" != ?:/* ]]; then
   if ! uv python install "$UV_PYTHON" >/dev/null 2>&1; then
     _interpreter="$(bash $HERE/fetch-python.sh)" || {
