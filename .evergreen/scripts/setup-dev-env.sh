@@ -59,6 +59,7 @@ if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" != /* ]] && [[ "$UV_PYTHON" != ?:/
 
     export UV_PYTHON="$_interpreter"
     export PATH="$_path_dir:$PATH"
+  fi
 fi
 
 # Add the default install path to the path if needed.
