@@ -290,9 +290,9 @@ def handle_test_env() -> None:
             krb_conf.touch()
             write_env("KRB5_CONFIG", krb_conf)
             LOGGER.info("Writing keytab")
-            # The secret may carry trailing whitespace or omit padding; Python
-            # 3.15's base64.b64decode rejects both.
-            keytab_b64 = config["KEYTAB_BASE64"].strip()
+            # The secret may carry whitespace or omit padding; Python 3.15's
+            # base64.b64decode rejects both.
+            keytab_b64 = "".join(config["KEYTAB_BASE64"].split())
             keytab = base64.b64decode(keytab_b64 + "=" * (-len(keytab_b64) % 4))
             keytab_file = ROOT / ".evergreen/drivers.keytab"
             with keytab_file.open("wb") as fid:
