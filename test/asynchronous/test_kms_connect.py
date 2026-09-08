@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import http.client
 import socket
 import ssl
@@ -60,6 +61,28 @@ class TestKmsConnectCallbackUnit(AsyncPyMongoTestCase):
     @staticmethod
     def _pool_options():
         return PoolOptions(connect_timeout=10, socket_timeout=10, ssl_context=None)
+
+    @unittest.skipUnless(_HAVE_PYMONGOCRYPT, "pymongocrypt is not installed")
+    async def test_init_kms_connect_callback(self):
+        opts = AutoEncryptionOpts({}, "k.d")
+        self.assertIsNone(opts._kms_connect_callback)
+
+        async def callback(context):
+            raise AssertionError("not called")
+
+        opts = AutoEncryptionOpts({}, "k.d", kms_connect_callback=callback)
+        self.assertIs(opts._kms_connect_callback, callback)
+
+        for bad in [1, "not-callable", object()]:
+            with self.assertRaisesRegex(TypeError, "kms_connect_callback must be callable"):
+                AutoEncryptionOpts({}, "k.d", kms_connect_callback=bad)  # type: ignore[arg-type]
+
+        context = KMSConnectContext(host="kms.example.com", port=443, timeout=9.5)
+        self.assertEqual(context.host, "kms.example.com")
+        self.assertEqual(context.port, 443)
+        self.assertEqual(context.timeout, 9.5)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            context.host = "evil.example.com"  # type: ignore[misc]
 
     async def test_non_socket_return_raises_configuration_error(self):
         async def callback(context):
