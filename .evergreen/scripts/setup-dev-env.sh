@@ -35,13 +35,30 @@ fi
 # pre-release, fall back to python-build-standalone's latest release.
 if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" != /* ]] && [[ "$UV_PYTHON" != ?:/* ]]; then
   if ! uv python install "$UV_PYTHON" >/dev/null 2>&1; then
-    _interpreter="$(bash $HERE/fetch-python.sh)" || {
+    _prefix="$(bash "$HERE/fetch-python.sh")" || {
       echo "Failed to obtain a Python $UV_PYTHON interpreter" >&2
       exit 1
     }
+
+    if [ -x "$_prefix/bin/python3" ]; then
+      _interpreter="$_prefix/bin/python3"
+      _path_dir="$_prefix/bin"
+    elif [ -x "$_prefix/bin/python3t" ]; then
+      _interpreter="$_prefix/bin/python3t"
+      _path_dir="$_prefix/bin"
+    elif [ -x "$_prefix/bin/python" ]; then
+      _interpreter="$_prefix/bin/python"
+      _path_dir="$_prefix/bin"
+    elif [ -f "$_prefix/python.exe" ]; then
+      _interpreter="$_prefix/python.exe"
+      _path_dir="$_prefix"
+    else
+      echo "No Python interpreter found under $_prefix" >&2
+      exit 1
+    fi
+
     export UV_PYTHON="$_interpreter"
-    export PATH="$_interpreter/bin:$PATH"
-  fi
+    export PATH="$_path_dir:$PATH"
 fi
 
 # Add the default install path to the path if needed.
