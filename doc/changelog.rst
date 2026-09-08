@@ -16,6 +16,15 @@ Changes in Version 4.19.0 (unreleased)
   :class:`~pymongo.encryption_options.AsyncHTTPProxyKMSConnect` instead of
   writing a callback.
 
+Bug fixes
+.........
+
+- Fixed a bug where the synchronous client could permanently deadlock under
+  gevent when a greenlet was killed while checking a connection back into
+  the pool (`PYTHON-6074`_).
+
+.. _PYTHON-6074: https://jira.mongodb.org/browse/PYTHON-6074
+
 Changes in Version 4.18.0 (2026/09/03)
 --------------------------------------
 
