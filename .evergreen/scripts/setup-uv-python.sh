@@ -18,8 +18,12 @@ if [ -f $HERE/test-env.sh ]; then
   . $HERE/test-env.sh
 fi
 
-# Prefer system/toolchain interpreters over uv-managed downloads.
-export UV_PYTHON_PREFERENCE=system
+# Prefer system/toolchain interpreters over uv-managed downloads.  Skip on
+# Windows, where the first python3 on the path is a broken Chocolatey shim that
+# uv cannot inspect.
+if [ "Windows_NT" != "${OS:-}" ]; then
+  export UV_PYTHON_PREFERENCE=system
+fi
 
 # UV_PYTHON is always a version identifier (e.g. 3.14), never a path.  uv
 # discovers the interpreter itself, so a matching toolchain (system) Python is
