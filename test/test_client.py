@@ -2586,14 +2586,10 @@ class TestExhaustCursor(IntegrationTest):
         import gevent.thread as _gthread
         from gevent import Timeout, spawn
 
-        # PYTHON-6074: widen gevent's courtesy-yield window (the bare
-        # sleep() on a failed non-blocking lock acquire, which
-        # Condition.notify()'s _is_owned() hits on every checkin) so a
-        # GreenletExit lands in that window deterministically. Synthetic:
-        # only the bare sleep() is widened; sleep(t) with args passes
-        # through, so the reaper and watchdog timings are unchanged. Set
-        # AMPLIFY_RACE=1 to enable; the unfixed test then deadlocks
-        # within seconds every run.
+        # AMPLIFY_RACE=1 widens gevent's brief sleep on a contended lock
+        # so a kill lands there reliably. Only the bare sleep() is
+        # widened; timed sleeps pass through. The unfixed test then
+        # deadlocks within seconds.
         if os.environ.get("AMPLIFY_RACE", "0") == "1":
             _AMPLIFY_SECONDS = float(os.environ.get("AMPLIFY_SECONDS", "0.02"))
 
@@ -2682,9 +2678,9 @@ class TestExhaustCursor(IntegrationTest):
                 reaper_gr.kill(block=False)
             except Exception:
                 pass
-            # Close the client but never hang on a wedged pool: without the
-            # PYTHON-6074 fix the pool's size gate is saturated and close() can
-            # block forever, so bound it and let the watchdog's self.fail()
+            # Close the client but don't hang if the pool deadlocked: without
+            # the PYTHON-6074 fix the pool's size gate is saturated and close()
+            # can block forever, so bound it and let the watchdog's self.fail()
             # propagate.
             try:
                 with Timeout(5):
