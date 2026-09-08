@@ -581,8 +581,6 @@ def create_alternative_hosts_variants():
         tags = []
         if "fips" in host_name.lower():
             expansions["REQUIRE_FIPS"] = "1"
-            # Use explicit Python 3.11 binary on the host since the default python3 is 3.9.
-            expansions["UV_PYTHON"] = "/usr/bin/python3.11"
         if "amazon" in host_name.lower():
             tags.append("pr")
         variants.append(

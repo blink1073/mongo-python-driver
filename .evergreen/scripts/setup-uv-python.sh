@@ -18,16 +18,29 @@ if [ -f $HERE/test-env.sh ]; then
   . $HERE/test-env.sh
 fi
 
-# Always use UV_PYTHON to select the Python version.
+# Prefer system/toolchain interpreters over uv-managed downloads.
+export UV_PYTHON_PREFERENCE=system
+
+# UV_PYTHON is always a version identifier (e.g. 3.14), never a path.  uv
+# discovers the interpreter itself, so a matching toolchain (system) Python is
+# put on the path instead of pointing UV_PYTHON at it.
 if [ -z "${UV_PYTHON:-}" ]; then
-  export UV_PYTHON="$_python"
+  if [ "${REQUIRE_FIPS:-}" = "1" ]; then
+    # FIPS hosts provision a specific Python; put its directory first on the
+    # path and leave UV_PYTHON unset so uv resolves the interpreter from PATH.
+    export PATH="/usr/bin:$PATH"
+  else
+    export UV_PYTHON="$_python"
+  fi
 fi
 
-# Prefer a toolchain (system) python over a uv-managed download: resolve a
-# bare version like 3.10 or 3.14t to the toolchain interpreter when one is
-# installed, and put its directory on the path.  Anything else (a path, or a
-# version uv must install itself, such as a pre-release) is left alone.
-if [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
+# Whether a toolchain Python matching UV_PYTHON was found on the host.
+PYTHON_FOUND=0
+# Prefer a toolchain (system) python over a uv-managed download: when a
+# matching toolchain interpreter is installed, put its bin directory on the
+# path and let uv pick it up.  Versions uv must install itself (pre-releases)
+# are left for the install/fetch fallback in setup-dev-env.sh.
+if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
   case "$(uname -s)" in
     Darwin)
       if [[ "$UV_PYTHON" == *"t"* ]]; then
@@ -40,8 +53,8 @@ if [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
       _version="${UV_PYTHON%t}"
       _bin_dir="/Library/Frameworks/${framework_dir}.Framework/Versions/$_version/bin"
       if [ -x "$_bin_dir/$binary_name" ]; then
-        export UV_PYTHON="$_bin_dir/$binary_name"
         export PATH="$_bin_dir:$PATH"
+        PYTHON_FOUND=1
       fi
       ;;
     *)
@@ -58,16 +71,17 @@ if [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
           _bin_dir="C:/python/Python${_dir}"
         fi
         if [ -f "$_bin_dir/$_exe" ]; then
-          export UV_PYTHON="$_bin_dir/$_exe"
           export PATH="$_bin_dir:$PATH"
+          PYTHON_FOUND=1
         fi
       else
         _bin_dir="/opt/python/$UV_PYTHON/bin"
         if [ -x "$_bin_dir/python3" ]; then
-          export UV_PYTHON="$_bin_dir/python3"
           export PATH="$_bin_dir:$PATH"
+          PYTHON_FOUND=1
         fi
       fi
       ;;
   esac
 fi
+export PYTHON_FOUND

@@ -28,36 +28,23 @@ if [ -f $HERE/env.sh ]; then
   . $HERE/env.sh
 fi
 
-# Only a bare version (e.g. "3.15") can trigger a download. setup-uv-python.sh
-# turns toolchain and system Pythons into absolute paths, which the checks
-# below skip, so a download means the version is missing from both. Try uv's
-# managed install first, and when uv has no build for it, such as a
-# pre-release, fall back to python-build-standalone's latest release.
-if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" != /* ]] && [[ "$UV_PYTHON" != ?:/* ]]; then
+# UV_PYTHON is a bare version identifier (e.g. 3.14), never a path.  A download
+# only happens when no toolchain Python matches it (PYTHON_FOUND unset): try
+# uv's managed build first, and when uv has no build (e.g. a pre-release), fall
+# back to python-build-standalone's latest release, putting the interpreter's
+# bin directory on the path so uv resolves UV_PYTHON.
+if [ -n "${UV_PYTHON:-}" ] && [ "${PYTHON_FOUND:-}" != "1" ]; then
   if ! uv python install "$UV_PYTHON" >/dev/null 2>&1; then
     _prefix="$(bash "$HERE/fetch-python.sh")" || {
       echo "Failed to obtain a Python $UV_PYTHON interpreter" >&2
       exit 1
     }
 
-    if [ -x "$_prefix/bin/python3" ]; then
-      _interpreter="$_prefix/bin/python3"
-      _path_dir="$_prefix/bin"
-    elif [ -x "$_prefix/bin/python3t" ]; then
-      _interpreter="$_prefix/bin/python3t"
-      _path_dir="$_prefix/bin"
-    elif [ -x "$_prefix/bin/python" ]; then
-      _interpreter="$_prefix/bin/python"
-      _path_dir="$_prefix/bin"
-    elif [ -f "$_prefix/python.exe" ]; then
-      _interpreter="$_prefix/python.exe"
+    if [ -f "$_prefix/python.exe" ]; then
       _path_dir="$_prefix"
     else
-      echo "No Python interpreter found under $_prefix" >&2
-      exit 1
+      _path_dir="$_prefix/bin"
     fi
-
-    export UV_PYTHON="$_interpreter"
     export PATH="$_path_dir:$PATH"
   fi
 fi
