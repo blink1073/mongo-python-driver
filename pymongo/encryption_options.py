@@ -179,6 +179,10 @@ class HTTPProxyKMSConnect:
         :class:`AsyncHTTPProxyKMSConnect`, because the event loop cannot read
         an :class:`ssl.SSLSocket`.
         """
+        # The caller's timeout covered the CONNECT handshake, not the KMS
+        # request that follows through the tunnel; let the driver's own
+        # timeout on driver_side govern the relay instead.
+        proxy.settimeout(None)
         driver_side, relay_side = socket.socketpair()
 
         def relay(src: socket.socket, dst: socket.socket) -> None:
@@ -198,12 +202,9 @@ class HTTPProxyKMSConnect:
                     pass
                 src.close()
 
-        started = []
         try:
             for pair in ((relay_side, proxy), (proxy, relay_side)):
-                thread = threading.Thread(target=relay, args=pair, daemon=True)
-                thread.start()
-                started.append(thread)
+                threading.Thread(target=relay, args=pair, daemon=True).start()
         except BaseException:
             # Unblock any thread that did start, then drop every socket.
             for sock in (proxy, relay_side, driver_side):

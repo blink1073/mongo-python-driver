@@ -434,6 +434,52 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         sock.sendall(b"ping")
         self.assertEqual(sock.recv(64), b"echo:ping")
 
+    def test_bridge_does_not_inherit_the_connect_deadline(self):
+        # The CONNECT deadline can be much shorter than the KMS request that
+        # follows through the tunnel; the relay must outlast it.
+        server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_ctx.load_cert_chain(CLIENT_PEM)
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+
+        def stub_proxy():
+            conn = None
+            try:
+                conn, _ = listener.accept()
+                tls = server_ctx.wrap_socket(conn, server_side=True)
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    chunk = tls.recv(4096)
+                    if not chunk:
+                        return
+                    request += chunk
+                tls.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                # Outlast the connect-phase deadline before the KMS side speaks.
+                time.sleep(0.4)
+                tls.sendall(b"echo:" + tls.recv(64))
+                tls.close()
+            except OSError:
+                pass
+            finally:
+                if conn is not None:
+                    conn.close()
+
+        threading.Thread(target=stub_proxy, daemon=True).start()
+
+        client_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        client_ctx.check_hostname = False
+        client_ctx.verify_mode = ssl.CERT_NONE
+        host, port = listener.getsockname()
+        context = KMSConnectContext(host="kms.example.com", port=443, timeout=0.2)
+
+        sock = HTTPProxyKMSConnect(host, port, client_ctx)(context)
+        self.addCleanup(sock.close)
+        sock.settimeout(10)
+        sock.sendall(b"ping")
+        self.assertEqual(sock.recv(64), b"echo:ping")
+
     def test_non_coroutine_callback_is_rejected(self):
         # The async API needs a coroutine function; a plain def must not be
         # awaited and retried.
