@@ -84,7 +84,7 @@ class KMSConnectContext:
        encryption passes the remaining budget. This deviates from the Client
        Side Operations Timeout specification; see PYTHON-6037.
 
-    .. versionadded:: 4.18
+    .. versionadded:: 4.19
     """
 
     host: str
@@ -144,7 +144,7 @@ class HTTPProxyKMSConnect:
     :param ssl_context: Optional :class:`ssl.SSLContext` for connecting to the
         proxy over TLS. Defaults to ``None``, meaning a plain connection.
 
-    .. versionadded:: 4.18
+    .. versionadded:: 4.19
     """
 
     def __init__(self, host: str, port: int, ssl_context: Optional[ssl.SSLContext] = None):
@@ -176,13 +176,13 @@ class HTTPProxyKMSConnect:
         """Relay a TLS proxy connection through a socketpair.
 
         Python cannot layer TLS over an :class:`ssl.SSLSocket`, so return the
-        plain end of a pair. Threads rather than tasks, even in
+        plain end of a pair. Uses threads rather than tasks, even in
         :class:`AsyncHTTPProxyKMSConnect`, because the event loop cannot read
         an :class:`ssl.SSLSocket`.
         """
-        # The caller's timeout covered the CONNECT handshake, not the KMS
-        # request that follows through the tunnel; let the driver's own
-        # timeout on driver_side govern the relay instead.
+        # Clear the CONNECT-phase timeout before relaying: the KMS request that
+        # follows through the tunnel is governed by the driver's own timeout on
+        # driver_side, not the already-elapsed connect budget.
         proxy.settimeout(None)
         driver_side, relay_side = socket.socketpair()
 
@@ -196,7 +196,7 @@ class HTTPProxyKMSConnect:
             except OSError:
                 pass
             finally:
-                # EOF the peer instead of closing a socket it may be reading.
+                # Send EOF to the peer instead of closing a socket it may be reading.
                 try:
                     dst.shutdown(socket.SHUT_RDWR)
                 except OSError:
@@ -247,11 +247,10 @@ class AsyncHTTPProxyKMSConnect(HTTPProxyKMSConnect):
     callable and runs the blocking connect in a thread so the event loop stays
     free.
 
-    .. versionadded:: 4.18
+    .. versionadded:: 4.19
     """
 
     async def __call__(self, context: KMSConnectContext) -> socket.socket:  # type: ignore[override]
-        # run_in_executor, as auth_oidc.py does for user callbacks.
         connect = functools.partial(super().__call__, context)
         future = asyncio.get_running_loop().run_in_executor(None, connect)
         try:
@@ -432,7 +431,7 @@ class AutoEncryptionOpts:
             :class:`AsyncHTTPProxyKMSConnect`. Defaults to ``None``, meaning
             the driver connects to KMS hosts directly.
 
-        .. versionchanged:: 4.18
+        .. versionchanged:: 4.19
            Added the `kms_connect_callback` parameter.
         .. versionchanged:: 4.12
            Added the `key_expiration_ms` parameter.

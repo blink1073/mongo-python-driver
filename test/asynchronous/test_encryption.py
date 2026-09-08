@@ -262,7 +262,7 @@ class TestAutoEncryptionOpts(AsyncPyMongoTestCase):
             context.host = "evil.example.com"  # type: ignore[misc]
 
 
-# KMS connect callback unit and prose tests moved to test_kms_connect.py.
+# KMS connect callback unit and prose tests (new in this PR) live in test_kms_connect.py.
 
 
 class TestClientOptions(AsyncPyMongoTestCase):
@@ -2035,7 +2035,7 @@ class TestKmsTLSProse(AsyncEncryptionIntegrationTest):
             await self.client_encrypted.create_data_key("aws", master_key=key)
 
 
-# KMS connect callback unit and prose tests moved to test_kms_connect.py.
+# KMS connect callback unit and prose tests (new in this PR) live in test_kms_connect.py.
 
 
 # https://github.com/mongodb/specifications/blob/master/source/client-side-encryption/tests/README.md#kms-tls-options-tests

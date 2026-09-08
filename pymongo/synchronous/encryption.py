@@ -144,6 +144,11 @@ def _connect_kms(
     kms_connect_callback: Optional[KMSConnectCallback],
     timeout: float,
 ) -> Union[socket.socket, _sslConn]:
+    """Connect to a KMS host and perform the TLS handshake over the socket.
+
+    Uses ``kms_connect_callback`` when one is provided, otherwise connects
+    directly, and always verifies against ``address`` (the KMS host).
+    """
     if kms_connect_callback is None:
         try:
             return _configured_socket(address, opts)
@@ -664,14 +669,14 @@ class ClientEncryption(Generic[_DocumentType]):
         :param kms_connect_callback: A callable that opens the connection to a
             KMS host, used to route KMS requests through an HTTP proxy. It
             receives a :class:`~pymongo.encryption_options.KMSConnectContext`
-            and returns a connected, unwrapped :class:`socket.socket`; the
+            and returns a connected, unwrapped :class:`socket.socket`. The
             driver then performs the KMS TLS handshake over it. For an ordinary
             HTTP proxy, pass
             :class:`~pymongo.encryption_options.HTTPProxyKMSConnect`.
             Defaults to ``None``, meaning the driver connects to KMS hosts
             directly.
 
-        .. versionchanged:: 4.18
+        .. versionchanged:: 4.19
            Added the `kms_connect_callback` parameter.
         .. versionchanged:: 4.12
            Added the `key_expiration_ms` parameter.
