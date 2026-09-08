@@ -19,21 +19,6 @@ fi
 # Handle the value for UV_PYTHON.
 . $HERE/setup-uv-python.sh
 
-# Python 3.15 pre-releases are not yet in the Evergreen toolchain or uv's
-# download index, so install them explicitly and fall back to fetching a
-# python-build-standalone build when uv cannot provide one.  The fallback is
-# temporary until these versions reach the toolchain.  Other versions resolve
-# through the toolchain or uv on their own.
-if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" != /* ]] && [[ "$UV_PYTHON" != ?:/* ]] && [[ "$UV_PYTHON" == 3.15* ]]; then
-  if ! uv python install "$UV_PYTHON" >/dev/null 2>&1; then
-    _interpreter="$(bash $HERE/fetch-python.sh)" || {
-      echo "Failed to obtain a Python $UV_PYTHON interpreter" >&2
-      exit 1
-    }
-    export UV_PYTHON="$_interpreter"
-  fi
-fi
-
 # Ensure dependencies are installed.
 bash $HERE/install-dependencies.sh
 
@@ -41,6 +26,20 @@ bash $HERE/install-dependencies.sh
 # had to install Python on an image that lacks a toolchain.
 if [ -f $HERE/env.sh ]; then
   . $HERE/env.sh
+fi
+
+# When uv cannot provide the requested version (for example, a pre-release uv
+# has not indexed yet), fetch it from python-build-standalone's latest release
+# and put it on the path.
+if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" != /* ]] && [[ "$UV_PYTHON" != ?:/* ]]; then
+  if ! uv python install "$UV_PYTHON" >/dev/null 2>&1; then
+    _interpreter="$(bash $HERE/fetch-python.sh)" || {
+      echo "Failed to obtain a Python $UV_PYTHON interpreter" >&2
+      exit 1
+    }
+    export UV_PYTHON="$_interpreter"
+    export PATH="$_interpreter/bin:$PATH"
+  fi
 fi
 
 # Add the default install path to the path if needed.

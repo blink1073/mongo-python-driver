@@ -14,11 +14,11 @@ from generate_config_utils import (
     DEFAULT_HOST,
     HOSTS,
     MIN_MAX_PYTHON,
+    NON_TOOLCHAIN_VERSIONS,
     OTHER_HOSTS,
     PYPYS,
     SYNCS,
     TOPOLOGIES,
-    UV_PYTHON_VERSIONS,
     create_variant,
     get_assume_role,
     get_s3_put,
@@ -972,7 +972,7 @@ def create_mod_wsgi_tasks():
         # Skip free-threaded builds and versions not yet in the toolchain:
         # mod_wsgi must be compiled against the toolchain python, and no
         # mod_wsgi module exists for a version the toolchain lacks.
-        if "t" in python or python in UV_PYTHON_VERSIONS:
+        if "t" in python or python in NON_TOOLCHAIN_VERSIONS:
             continue
         if test == "standalone":
             task_name = "mod-wsgi-"

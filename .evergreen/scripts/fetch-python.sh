@@ -1,18 +1,20 @@
 #!/bin/bash
-# Download a Python build from python-build-standalone and print the directory
-# uv should use for it.  Temporary: uv does not yet index Python 3.15
-# pre-releases, so we fetch the build ourselves until the version is available
-# in the Evergreen toolchain.  See PYTHON-6077.
+# Download a Python build from python-build-standalone's latest release and
+# print the interpreter directory for uv to use.  Invoked when uv cannot
+# provide the requested version, for example a pre-release uv has not indexed
+# yet.
 set -eu
 
-version="${UV_PYTHON:?UV_PYTHON must be set}"
-# python-build-standalone release tag that carries the builds below.
-pbs_tag="20260901"
+request="${UV_PYTHON:?UV_PYTHON must be set}"
 
+# Free-threaded builds are published under a separate asset.
+variant=""
+version="$request"
 case "$version" in
-  3.15.0rc2t) interpreter="3.15.0rc2"; variant="-freethreaded" ;;
-  3.15.0rc2) interpreter="3.15.0rc2"; variant="" ;;
-  *) echo "No python-build-standalone build configured for Python $version" >&2; exit 1 ;;
+  *t)
+    variant="-freethreaded"
+    version="${version%t}"
+    ;;
 esac
 
 case "$(uname -s)" in
@@ -28,17 +30,29 @@ case "$(uname -m)" in
   *) echo "Unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
 
-asset="cpython-${interpreter}+${pbs_tag}-${target_arch}${target_os}${variant}-install_only.tar.gz"
-url="https://github.com/astral-sh/python-build-standalone/releases/download/${pbs_tag}/${asset//+/%2B}"
+# The latest python-build-standalone release carries one build per minor
+# version, e.g. cpython-3.15.0rc2+20260901-aarch64-apple-darwin-install_only.tar.gz.
+release="$(curl -fsSL --retry 3 https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest)"
+tag="$(printf '%s' "$release" | sed -nE 's/.*"tag_name": *"([^"]+)".*/\1/p')"
+asset="$(printf '%s' "$release" \
+  | grep -oE "cpython-${version//./\\.}\\.[^\"]*-${target_arch}${target_os}${variant}-install_only\\.tar\\.gz" \
+  | head -1)"
 
-# Use a native path on Windows: bash reports MSYS paths (e.g. /home/user)
-# that the native Windows uv binary cannot resolve. Normalize backslashes
-# to forward slashes, which both uv and the shell's tar accept.
-dest="${base_dir}/.cache/python-build-standalone/${version}/${target_arch}${target_os}"
+if [ -z "$asset" ]; then
+  echo "No python-build-standalone build for Python $request" >&2
+  exit 1
+fi
+
+url="https://github.com/astral-sh/python-build-standalone/releases/download/${tag}/${asset//+/%2B}"
+
+# Use a native path on Windows: bash reports MSYS paths (e.g. /home/user) that
+# the native Windows uv binary cannot resolve. Normalize backslashes to forward
+# slashes, which both uv and the shell's tar accept.
+dest="${base_dir}/.cache/python-build-standalone/${request}/${target_arch}${target_os}"
 dest="$(printf '%s' "$dest" | tr '\\' '/')"
 if [ ! -d "$dest/python" ]; then
   mkdir -p "$dest"
-  echo "Downloading Python ${version} from python-build-standalone" >&2
+  echo "Downloading Python $request from python-build-standalone" >&2
   curl -fL --retry 3 "$url" | tar -xz -C "$dest"
 fi
 echo "$dest/python"
