@@ -58,32 +58,31 @@ from bson.timestamp import Timestamp
 from pymongo import _csot, _op_id, common, helpers_shared, periodic_executor
 from pymongo._telemetry import _generate_op_id_or_none, log_command_retry
 from pymongo.client_options import ClientOptions
+from pymongo.client_session_shared import SessionOptions, TransactionOptions, _EmptyServerSession
 from pymongo.driver_info import DriverInfo
 from pymongo.errors import (
     AutoReconnect,
-    BulkWriteError,
     ClientBulkWriteException,
     ConfigurationError,
     ConnectionFailure,
     InvalidOperation,
-    NotPrimaryError,
     OperationFailure,
     PyMongoError,
     ServerSelectionTimeoutError,
-    WaitQueueTimeoutError,
-    WriteConcernError,
 )
 from pymongo.lock import (
     _HAS_REGISTER_AT_FORK,
     _create_lock,
-    _release_locks,
 )
 from pymongo.logger import (
-    _CLIENT_LOGGER,
     _log_client_error,
-    _log_or_warn,
 )
 from pymongo.message import _CursorAddress, _GetMore, _Query
+from pymongo.mongo_client_shared import (
+    _add_retryable_write_error,
+    _after_fork_child,
+    _detect_external_db,
+)
 from pymongo.monitoring import ConnectionClosedReason, _EventListeners
 from pymongo.operations import (
     DeleteMany,
@@ -102,14 +101,12 @@ from pymongo.server_type import SERVER_TYPE
 from pymongo.synchronous import client_session, database, uri_parser
 from pymongo.synchronous.change_stream import ChangeStream, ClusterChangeStream
 from pymongo.synchronous.client_bulk import _ClientBulk
-from pymongo.synchronous.client_session import _SESSION, _EmptyServerSession
+from pymongo.synchronous.client_session import _SESSION
 from pymongo.synchronous.command_cursor import CommandCursor
-from pymongo.synchronous.helpers import (
-    _RetryPolicy,
-)
 from pymongo.synchronous.settings import TopologySettings
-from pymongo.synchronous.topology import Topology, _ErrorContext
+from pymongo.synchronous.topology import Topology
 from pymongo.topology_description import TOPOLOGY_TYPE, TopologyDescription
+from pymongo.topology_shared import _ErrorContext
 from pymongo.typings import (
     ClusterTime,
     _Address,
@@ -133,11 +130,12 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from bson.objectid import ObjectId
+    from pymongo.client_session_shared import _ServerSession
     from pymongo.read_concern import ReadConcern
     from pymongo.response import Response
     from pymongo.server_selectors import Selection
     from pymongo.synchronous.bulk import _Bulk
-    from pymongo.synchronous.client_session import ClientSession, _ServerSession
+    from pymongo.synchronous.client_session import ClientSession
     from pymongo.synchronous.cursor_base import _ConnectionManager
     from pymongo.synchronous.encryption import _Encrypter
     from pymongo.synchronous.pool import Connection, _PoolCheckout
@@ -422,8 +420,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             zlib support requires the Python standard library zlib module. For
             Python before 3.14 zstd requires the `backports.zstd <https://pypi.org/project/backports.zstd/>`_
             package. By default no compression is used. Compression support
-            must also be enabled on the server. MongoDB 3.6+ supports snappy
-            and zlib compression. MongoDB 4.2+ adds support for zstd.
+            must also be enabled on the server.
             See `compress network traffic <https://www.mongodb.com/docs/languages/python/pymongo-driver/current/connect/connection-options/network-compression/#compress-network-traffic>`_ for details.
           - `zlibCompressionLevel`: (int) The zlib compression level to use
             when zlib is used as the wire protocol compressor. Supported values
@@ -449,6 +446,30 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             connect to. More specifically, when a "mongodb+srv://" connection string
             resolves to more than srvMaxHosts number of hosts, the client will randomly
             choose an srvMaxHosts sized subset of hosts.
+          - `srvAllowedHostsSuffix`: (string) Overrides the default requirement that
+            hosts returned by SRV DNS records share the same parent domain as the seed
+            hostname. When set, the driver accepts any returned host whose name ends
+            with this suffix (e.g. ``".atlas.mongodb.com"``). The value must not be a
+            public suffix (per the Public Suffix List). Only valid with
+            ``mongodb+srv://`` URIs.
+
+            .. warning::
+
+               This option relaxes a built-in DNS spoofing safeguard. Use the most
+               specific suffix possible for your deployment rather than a broad
+               company-wide domain. For example, instead of::
+
+                   MongoClient(
+                       "mongodb+srv://cluster.test.internal.example.com/",
+                       srvAllowedHostsSuffix=".example.com",
+                   )
+
+               which would accept any host across the entire domain, scope it further like so::
+
+                   MongoClient(
+                       "mongodb+srv://cluster.test.internal.example.com/",
+                       srvAllowedHostsSuffix=".internal.example.com",
+                   )
 
 
           | **Write Concern options:**
@@ -802,6 +823,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
         fqdn = None
         srv_service_name = keyword_opts.get("srvservicename")
         srv_max_hosts = keyword_opts.get("srvmaxhosts")
+        srv_allowed_hosts_suffix = keyword_opts.get("srvallowedhostssuffix")
         if len([h for h in self._host if "/" in h]) > 1:
             raise ConfigurationError("host must not contain multiple MongoDB URIs")
         for entity in self._host:
@@ -852,6 +874,8 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             srv_service_name = opts.get("srvServiceName", common.SRV_SERVICE_NAME)
 
         srv_max_hosts = srv_max_hosts or opts.get("srvmaxhosts")
+        if srv_allowed_hosts_suffix is None:
+            srv_allowed_hosts_suffix = opts.get("srvallowedhostssuffix")
         opts = self._normalize_and_validate_options(opts, self._seeds)
 
         # Username and password passed as kwargs override user info in URI.
@@ -887,9 +911,13 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             self._options.read_concern,
         )
 
-        self._retry_policy = _RetryPolicy(attempts=self._options.max_adaptive_retries)
+        self._retry_policy = helpers_shared._RetryPolicy(
+            attempts=self._options.max_adaptive_retries
+        )
 
-        self._init_based_on_options(self._seeds, srv_max_hosts, srv_service_name)
+        self._init_based_on_options(
+            self._seeds, srv_max_hosts, srv_service_name, srv_allowed_hosts_suffix
+        )
 
         self._opened = False
         self._closed = False
@@ -907,6 +935,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
         opts = common._CaseInsensitiveDictionary()
         srv_service_name = keyword_opts.get("srvservicename")
         srv_max_hosts = keyword_opts.get("srvmaxhosts")
+        srv_allowed_hosts_suffix = keyword_opts.get("srvallowedhostssuffix")
         for entity in self._host:
             # A hostname can only include a-z, 0-9, '-' and '.'. If we find a '/'
             # it must be a URI,
@@ -927,6 +956,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
                     connect_timeout=timeout,
                     srv_service_name=srv_service_name,
                     srv_max_hosts=srv_max_hosts,
+                    srv_allowed_hosts_suffix=srv_allowed_hosts_suffix,
                 )
                 seeds.update(res["nodelist"])
                 opts = res["options"]
@@ -959,6 +989,8 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
                 srv_service_name = opts.get("srvServiceName", common.SRV_SERVICE_NAME)
 
             srv_max_hosts = srv_max_hosts or opts.get("srvmaxhosts")
+            if srv_allowed_hosts_suffix is None:
+                srv_allowed_hosts_suffix = opts.get("srvAllowedHostsSuffix")
             opts = self._normalize_and_validate_options(opts, seeds)
 
             # Username and password passed as kwargs override user info in URI.
@@ -968,10 +1000,16 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
                 username, password, self._resolve_srv_info["dbase"], opts, _IS_SYNC
             )
 
-            self._init_based_on_options(seeds, srv_max_hosts, srv_service_name)
+            self._init_based_on_options(
+                seeds, srv_max_hosts, srv_service_name, srv_allowed_hosts_suffix
+            )
 
     def _init_based_on_options(
-        self, seeds: Collection[tuple[str, int]], srv_max_hosts: Any, srv_service_name: Any
+        self,
+        seeds: Collection[tuple[str, int]],
+        srv_max_hosts: Any,
+        srv_service_name: Any,
+        srv_allowed_hosts_suffix: Any,
     ) -> None:
         self._event_listeners = self._options.pool_options._event_listeners
         self._topology_settings = TopologySettings(
@@ -990,6 +1028,7 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             load_balanced=self._options.load_balanced,
             srv_service_name=srv_service_name,
             srv_max_hosts=srv_max_hosts,
+            srv_allowed_hosts_suffix=srv_allowed_hosts_suffix,
             server_monitoring_mode=self._options.server_monitoring_mode,
             topology_id=self._topology_settings._topology_id if self._topology_settings else None,
         )
@@ -1391,13 +1430,13 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
 
     def _start_session(self, implicit: bool, **kwargs: Any) -> ClientSession:
         server_session = _EmptyServerSession()
-        opts = client_session.SessionOptions(**kwargs)
+        opts = SessionOptions(**kwargs)
         return client_session.ClientSession(self, server_session, opts, implicit)
 
     def start_session(
         self,
         causal_consistency: Optional[bool] = None,
-        default_transaction_options: Optional[client_session.TransactionOptions] = None,
+        default_transaction_options: Optional[TransactionOptions] = None,
         snapshot: Optional[bool] = False,
     ) -> client_session.ClientSession:
         """Start a logical session.
@@ -2562,53 +2601,6 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
         return blk.execute(session, _Op.BULK_WRITE)
 
 
-def _retryable_error_doc(exc: PyMongoError) -> Optional[Mapping[str, Any]]:
-    """Return the server response from PyMongo exception or None."""
-    if isinstance(exc, (BulkWriteError, ClientBulkWriteException)):
-        # Check the last writeConcernError to determine if this
-        # BulkWriteError is retryable.
-        wces = exc.details["writeConcernErrors"]
-        return wces[-1] if wces else None
-    if isinstance(exc, (NotPrimaryError, OperationFailure)):
-        return cast(Mapping[str, Any], exc.details)
-    return None
-
-
-def _add_retryable_write_error(exc: PyMongoError, max_wire_version: int, is_mongos: bool) -> None:
-    doc = _retryable_error_doc(exc)
-    if doc:
-        code = doc.get("code", 0)
-        # retryWrites on MMAPv1 should raise an actionable error.
-        if code == 20 and str(exc).startswith("Transaction numbers"):
-            errmsg = (
-                "This MongoDB deployment does not support "
-                "retryable writes. Please add retryWrites=false "
-                "to your connection string."
-            )
-            raise OperationFailure(errmsg, code, exc.details)  # type: ignore[attr-defined]
-        if max_wire_version >= 9:
-            # In MongoDB 4.4+, the server reports the error labels.
-            for label in doc.get("errorLabels", []):
-                exc._add_error_label(label)
-        else:
-            # Do not consult writeConcernError for pre-4.4 mongos.
-            if isinstance(exc, WriteConcernError) and is_mongos:
-                pass
-            elif code in helpers_shared._RETRYABLE_ERROR_CODES:
-                exc._add_error_label("RetryableWriteError")
-
-    # Connection errors are always retryable except NotPrimaryError and WaitQueueTimeoutError which is
-    # handled above.
-    if isinstance(exc, ClientBulkWriteException):
-        exc_to_check = exc.error
-    else:
-        exc_to_check = exc
-    if isinstance(exc_to_check, ConnectionFailure) and not isinstance(
-        exc_to_check, (NotPrimaryError, WaitQueueTimeoutError)
-    ):
-        exc_to_check._add_error_label("RetryableWriteError")
-
-
 class _ClientCheckout:
     """Context manager for checking out a connection from the pool.
 
@@ -2724,14 +2716,6 @@ class _ClientCheckout:
             ):
                 session._pin(server, conn)
             self.contribute_socket(conn)
-            if (
-                self.client._encrypter
-                and not self.client._encrypter._bypass_auto_encryption
-                and conn.max_wire_version < 8
-            ):
-                raise ConfigurationError(
-                    "Auto-encryption requires a minimum MongoDB version of 4.2"
-                )
         except BaseException as exc:
             try:
                 self.handle(type(exc), exc)
@@ -3100,17 +3084,13 @@ class _ClientConnectionRetryable(Generic[T]):
         :return: Output for func()'s call
         """
         try:
-            max_wire_version = 0
-            is_mongos = False
             self._server = self._get_server()
             with self._client._checkout(self._server, self._session) as conn:
-                max_wire_version = conn.max_wire_version
                 sessions_supported = (
                     self._session
                     and self._server.description.retryable_writes_supported
                     and conn.supports_sessions
                 )
-                is_mongos = conn.is_mongos
                 if not self._always_retryable and not sessions_supported:
                     # A retry is not possible because this server does
                     # not support sessions raise the last error.
@@ -3127,7 +3107,7 @@ class _ClientConnectionRetryable(Generic[T]):
             if not self._retryable:
                 raise
             # Add the RetryableWriteError label, if applicable.
-            _add_retryable_write_error(exc, max_wire_version, is_mongos)
+            _add_retryable_write_error(exc)
             raise
 
     def _read(self) -> T:
@@ -3152,45 +3132,8 @@ class _ClientConnectionRetryable(Generic[T]):
                 return self._func(self._session, self._server, conn, read_pref)  # type: ignore
 
 
-def _after_fork_child() -> None:
-    """Releases the locks in child process and resets the
-    topologies in all MongoClients.
-    """
-    # Reinitialize locks
-    _release_locks()
-
-    # Perform cleanup in clients (i.e. get rid of topology)
-    for _, client in MongoClient._clients.items():
-        client._after_fork()
-
-
-def _detect_external_db(entity: str) -> bool:
-    """Detects external database hosts and logs an informational message at the INFO level."""
-    entity = entity.lower()
-    cosmos_db_hosts = [".cosmos.azure.com"]
-    document_db_hosts = [".docdb.amazonaws.com", ".docdb-elastic.amazonaws.com"]
-
-    for host in cosmos_db_hosts:
-        if entity.endswith(host):
-            _log_or_warn(
-                _CLIENT_LOGGER,
-                "You appear to be connected to a CosmosDB cluster. For more information regarding feature "
-                "compatibility and support please visit https://www.mongodb.com/supportability/cosmosdb",
-            )
-            return True
-    for host in document_db_hosts:
-        if entity.endswith(host):
-            _log_or_warn(
-                _CLIENT_LOGGER,
-                "You appear to be connected to a DocumentDB cluster. For more information regarding feature "
-                "compatibility and support please visit https://www.mongodb.com/supportability/documentdb",
-            )
-            return True
-    return False
-
-
 if _HAS_REGISTER_AT_FORK:
     # This will run in the same thread as the fork was called.
     # If we fork in a critical region on the same thread, it should break.
     # This is fine since we would never call fork directly from a critical region.
-    os.register_at_fork(after_in_child=_after_fork_child)
+    os.register_at_fork(after_in_child=lambda: _after_fork_child(MongoClient._clients))
