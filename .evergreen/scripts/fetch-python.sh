@@ -26,7 +26,13 @@ esac
 
 case "$(uname -m)" in
   arm64 | aarch64) target_arch="aarch64" ;;
-  x86_64) target_arch="x86_64" ;;
+  x86_64)
+    if [ "Windows_NT" = "${OS:-}" ] && [ -n "${IS_WIN32:-}" ]; then
+      target_arch="i686"
+    else
+      target_arch="x86_64"
+    fi
+    ;;
   *) echo "Unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
 
