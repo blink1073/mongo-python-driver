@@ -192,12 +192,16 @@ async def _connect_kms(
             "kms_connect_callback must return a stream socket, not a datagram one."
         )
     # The callback established the tunnel and may have consumed much of the
-    # CSOT budget, so recompute the remaining time for the TLS handshake.
+    # CSOT budget, so recompute the remaining time for the TLS handshake and
+    # again for the KMS request that follows: wrapping resets the socket
+    # timeout to the pre-callback capture.
     sock.settimeout(max(_csot.clamp_remaining(_KMS_CONNECT_TIMEOUT), 0.001))
     try:
-        return await _async_wrap_socket_tls(sock, address, opts)
+        conn = await _async_wrap_socket_tls(sock, address, opts)
     except Exception as exc:
         _raise_connection_failure(address, exc, timeout_details=_get_timeout_details(opts))
+    conn.settimeout(max(_csot.clamp_remaining(_KMS_CONNECT_TIMEOUT), 0.001))
+    return conn
 
 
 class _EncryptionIO(AsyncMongoCryptCallback):  # type: ignore[misc]

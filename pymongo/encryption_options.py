@@ -152,16 +152,18 @@ class HTTPProxyKMSConnect:
         self.port = port
         self.ssl_context = ssl_context
 
-    def _tunnel(self, sock: socket.socket, context: KMSConnectContext) -> None:
+    def _tunnel(self, sock: socket.socket, context: KMSConnectContext, deadline: float) -> None:
         # An IPv6 literal needs brackets to be a valid HTTP authority.
         host = f"[{context.host}]" if ":" in context.host else context.host
         target = f"{host}:{context.port}"
         sock.sendall(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode())
         # A byte at a time: a bulk read could consume tunnelled bytes sent in
         # the same segment as the response, and the driver reads those from
-        # this same socket.
+        # this same socket. Reapply the remaining budget before each read so a
+        # proxy that trickles bytes cannot keep this loop alive past the deadline.
         response = bytearray()
         while not response.endswith(b"\r\n\r\n"):
+            sock.settimeout(_remaining(deadline))
             chunk = sock.recv(1)
             if not chunk:
                 raise OSError(f"proxy closed the connection while tunneling to {target}")
@@ -170,10 +172,14 @@ class HTTPProxyKMSConnect:
                 raise OSError(f"proxy sent an oversized CONNECT response for {target}")
         status = bytes(response).split(b"\r\n", 1)[0]
         # A CONNECT is successful for any 2xx status, e.g. "HTTP/1.0 200" or
-        # "HTTP/1.1 201", so reject malformed lines and non-2xx statuses rather
-        # than matching a single prefix.
+        # "HTTP/1.1 201"; require a three-digit code and reject malformed lines.
         parts = status.split(b" ", 2)
-        valid = len(parts) >= 2 and parts[0].startswith(b"HTTP/") and parts[1].isdigit()
+        valid = (
+            len(parts) >= 2
+            and parts[0].startswith(b"HTTP/")
+            and len(parts[1]) == 3
+            and parts[1].isdigit()
+        )
         if not valid or not 200 <= int(parts[1]) < 300:
             raise OSError(f"proxy refused CONNECT to {target}: {status!r}")
 
@@ -222,7 +228,9 @@ class HTTPProxyKMSConnect:
             raise
         return driver_side
 
-    def __call__(self, context: KMSConnectContext) -> socket.socket:
+    def __call__(
+        self, context: KMSConnectContext, deadline: Optional[float] = None
+    ) -> socket.socket:
         # A configurable KMS host could inject CR/LF into the CONNECT request
         # or Host header, so reject it before opening the proxy connection.
         if "\r" in context.host or "\n" in context.host:
@@ -230,15 +238,18 @@ class HTTPProxyKMSConnect:
                 f"KMS host must not contain control characters: {context.host!r}"
             )
         # One deadline for all three phases; a timeout per phase would let the
-        # total run to several times the caller's budget.
-        deadline = time.monotonic() + context.timeout
-        sock = socket.create_connection((self.host, self.port), timeout=_remaining(deadline))
+        # total run to several times the caller's budget. The async wrapper
+        # computes the deadline before scheduling so queueing behind other
+        # executor work is charged against it.
+        if deadline is None:
+            deadline = time.monotonic() + context.timeout
+        sock = self._connect_proxy(deadline)
         try:
             if self.ssl_context is not None:
                 sock.settimeout(_remaining(deadline))
                 sock = self.ssl_context.wrap_socket(sock, server_hostname=self.host)
             sock.settimeout(_remaining(deadline))
-            self._tunnel(sock, context)
+            self._tunnel(sock, context, deadline)
         except BaseException:
             sock.close()
             raise
@@ -249,6 +260,26 @@ class HTTPProxyKMSConnect:
         except BaseException:
             sock.close()
             raise
+
+    def _connect_proxy(self, deadline: float) -> socket.socket:
+        # Resolve and try each address with the budget recomputed per attempt,
+        # instead of create_connection applying the timeout to every address.
+        last_error: Optional[OSError] = None
+        for family, socktype, proto, _, sockaddr in socket.getaddrinfo(
+            self.host, self.port, type=socket.SOCK_STREAM
+        ):
+            sock = socket.socket(family, socktype, proto)
+            try:
+                sock.settimeout(_remaining(deadline))
+                sock.connect(sockaddr)
+            except OSError as exc:
+                last_error = exc
+                sock.close()
+                continue
+            return sock
+        raise OSError(
+            f"could not connect to proxy {self.host}:{self.port}: {last_error}"
+        ) from last_error
 
 
 class AsyncHTTPProxyKMSConnect(HTTPProxyKMSConnect):
@@ -262,7 +293,10 @@ class AsyncHTTPProxyKMSConnect(HTTPProxyKMSConnect):
     """
 
     async def __call__(self, context: KMSConnectContext) -> socket.socket:  # type: ignore[override]
-        connect = functools.partial(super().__call__, context)
+        # Capture the deadline before scheduling so time spent queued behind
+        # other executor work counts against the KMS budget.
+        deadline = time.monotonic() + context.timeout
+        connect = functools.partial(super().__call__, context, deadline)
         future = asyncio.get_running_loop().run_in_executor(None, connect)
         try:
             return await asyncio.shield(future)

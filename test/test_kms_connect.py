@@ -207,10 +207,12 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         self.addCleanup(sock.close)
         self.assertIsInstance(sock, socket.socket)
 
-        # A malformed status line must be rejected, not accepted as a 2xx.
-        host, port = run_stub(b"HTTP/1.1 2000 Evil\r\n\r\n")
-        with self.assertRaisesRegex(OSError, "refused CONNECT"):
-            HTTPProxyKMSConnect(host, port)(context)
+        # A status code must be exactly three digits; both a four-digit code
+        # and a zero-padded code are malformed.
+        for reply in (b"HTTP/1.1 2000 Evil\r\n\r\n", b"HTTP/1.1 00200 Evil\r\n\r\n"):
+            host, port = run_stub(reply)
+            with self.assertRaisesRegex(OSError, "refused CONNECT"):
+                HTTPProxyKMSConnect(host, port)(context)
 
     def test_control_characters_in_kms_host_are_rejected(self):
         # The host is configurable, so reject CR/LF before it reaches the
