@@ -121,7 +121,7 @@ class HTTPProxyKMSConnect:
     Pass an instance as ``kms_connect_callback`` to reach KMS hosts through a
     forward proxy that speaks HTTP ``CONNECT``::
 
-      from pymongo.encryption_options import HTTPProxyKMSConnect
+      from pymongo.encryption_options import AutoEncryptionOpts, HTTPProxyKMSConnect
 
       opts = AutoEncryptionOpts(
           kms_providers={"aws": aws_creds},

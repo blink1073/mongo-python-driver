@@ -687,8 +687,10 @@ class ClientEncryption(Generic[_DocumentType]):
             KMS host, used to route KMS requests through an HTTP proxy. It
             receives a :class:`~pymongo.encryption_options.KMSConnectContext`
             and returns a connected, unwrapped :class:`socket.socket`. The
-            driver then performs the KMS TLS handshake over it. For an ordinary
-            HTTP proxy, pass
+            driver then performs the KMS TLS handshake over it. The callback
+            must be a coroutine function for the synchronous API; a plain
+            callable is rejected before it can block the event loop. For an
+            ordinary HTTP proxy, pass
             :class:`~pymongo.encryption_options.HTTPProxyKMSConnect`.
             Defaults to ``None``, meaning the driver connects to KMS hosts
             directly.

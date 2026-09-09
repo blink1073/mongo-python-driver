@@ -623,6 +623,9 @@ class TestKmsConnectCallbackProse(AsyncEncryptionIntegrationTest):
         self.callback_calls.append(context)
         ctx = ssl.create_default_context(cafile=CA_PEM)
         ctx.check_hostname = False
+        # PYTHON-5040 tracks re-enabling verification once the test CA cert is
+        # fixed; the evergreen-tools CA lacks an Authority Key Identifier that
+        # newer OpenSSL requires, so verification fails on Windows 3.14.
         ctx.verify_mode = ssl.CERT_NONE
         callback = AsyncHTTPProxyKMSConnect(KMS_PROXY_HOST, KMS_TLS_PROXY_PORT, ctx)
         return await callback(context)
@@ -639,6 +642,9 @@ class TestKmsConnectCallbackProse(AsyncEncryptionIntegrationTest):
         if tls:
             ctx = ssl.create_default_context(cafile=CA_PEM)
             ctx.check_hostname = False
+            # PYTHON-5040 tracks re-enabling verification once the test CA cert
+            # is fixed; the evergreen-tools CA lacks an Authority Key Identifier
+            # that newer OpenSSL requires, so verification fails on Windows 3.14.
             ctx.verify_mode = ssl.CERT_NONE
             conn = http.client.HTTPSConnection(
                 f"{KMS_PROXY_HOST}:{KMS_TLS_PROXY_PORT}", context=ctx
@@ -725,7 +731,9 @@ class TestKmsConnectCallbackProse(AsyncEncryptionIntegrationTest):
         raw = await self.client.db.coll.find_one({"_id": 1})
         self.assertIsInstance(raw["encrypted_string"], Binary)
 
-        self.assertGreaterEqual(await self.connect_count(), 1)
+        # The decrypt reuses the cached key, so exactly one KMS request follows
+        # the reset.
+        self.assertEqual(await self.connect_count(), 1)
 
     async def test_04_callback_error(self):
         async def failing_callback(context):
