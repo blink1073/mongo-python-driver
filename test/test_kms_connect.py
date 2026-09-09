@@ -222,6 +222,21 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         with self.assertRaisesRegex(ConfigurationError, "control characters"):
             callback(context)
 
+    def test_cancelled_tls_wrap_closes_late_socket(self):
+        # Cancelling a TLS wrap can leave the executor producing an SSLSocket
+        # after the task is gone; the done callback must close that result.
+        if _IS_SYNC:
+            raise unittest.SkipTest("the cancel-safe wrap is an async path")
+        from pymongo.pool_shared import _close_late_socket
+
+        left, right = socket.socketpair()
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(left)
+        self.assertNotEqual(left.fileno(), -1)
+        _close_late_socket(future)
+        self.assertEqual(left.fileno(), -1)
+        self.addCleanup(right.close)
+
     def test_tls_proxy_helper_bridges_the_tunnel(self):
         # Covers the TLS-proxy path and the socketpair relay without KMS creds.
         server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -264,8 +279,13 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         sock = HTTPProxyKMSConnect(host, port, client_ctx)(context)
         self.addCleanup(sock.close)
         sock.settimeout(10)
-        sock.sendall(b"ping")
-        self.assertEqual(sock.recv(64), b"echo:ping")
+        if _IS_SYNC:
+            sock.sendall(b"ping")
+            self.assertEqual(sock.recv(64), b"echo:ping")
+        else:
+            asyncio.get_running_loop().run_in_executor(None, sock.sendall, b"ping")
+            data = asyncio.get_running_loop().run_in_executor(None, sock.recv, 64)
+            self.assertEqual(data, b"echo:ping")
 
     def test_bridge_does_not_inherit_the_connect_deadline(self):
         # The CONNECT deadline can be much shorter than the KMS request that
@@ -310,8 +330,13 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         sock = HTTPProxyKMSConnect(host, port, client_ctx)(context)
         self.addCleanup(sock.close)
         sock.settimeout(10)
-        sock.sendall(b"ping")
-        self.assertEqual(sock.recv(64), b"echo:ping")
+        if _IS_SYNC:
+            sock.sendall(b"ping")
+            self.assertEqual(sock.recv(64), b"echo:ping")
+        else:
+            asyncio.get_running_loop().run_in_executor(None, sock.sendall, b"ping")
+            data = asyncio.get_running_loop().run_in_executor(None, sock.recv, 64)
+            self.assertEqual(data, b"echo:ping")
 
     def test_non_coroutine_callback_is_rejected(self):
         # The async API needs a coroutine function; a plain def must be
@@ -375,7 +400,11 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         sock = HTTPProxyKMSConnect(host, port)(context)
         self.addCleanup(sock.close)
         sock.settimeout(10)
-        self.assertEqual(sock.recv(64), b"early-bytes")
+        if _IS_SYNC:
+            data = sock.recv(64)
+        else:
+            data = asyncio.get_running_loop().run_in_executor(None, sock.recv, 64)
+        self.assertEqual(data, b"early-bytes")
 
     def test_unconnected_socket_from_callback_is_rejected(self):
         # The contract says connected; an unconnected socket would otherwise

@@ -304,6 +304,12 @@ async def _async_create_connection(address: _Address, options: PoolOptions) -> s
         raise OSError("getaddrinfo failed")
 
 
+def _close_late_socket(future: asyncio.Future[Any]) -> None:
+    """Close a socket produced after its awaiting task was cancelled."""
+    if not future.cancelled() and future.exception() is None:
+        future.result().close()
+
+
 async def _async_wrap_socket_tls(
     sock: socket.socket, address: _Address, options: PoolOptions
 ) -> Union[socket.socket, _sslConn]:
@@ -329,13 +335,19 @@ async def _async_wrap_socket_tls(
         # to use SSLContext.check_hostname.
         if _has_sni(False):
             loop = asyncio.get_running_loop()
-            ssl_sock = await loop.run_in_executor(
-                None,
-                functools.partial(ssl_context.wrap_socket, sock, server_hostname=host),  # type: ignore[assignment, misc, unused-ignore]
-            )
+            wrap = functools.partial(ssl_context.wrap_socket, sock, server_hostname=host)  # type: ignore[assignment, misc, unused-ignore]
         else:
             loop = asyncio.get_running_loop()
-            ssl_sock = await loop.run_in_executor(None, ssl_context.wrap_socket, sock)  # type: ignore[assignment, misc, unused-ignore]
+            wrap = functools.partial(ssl_context.wrap_socket, sock)  # type: ignore[assignment, misc, unused-ignore]
+        # Shield the executor future: wrap_socket hands the fd to a new
+        # SSLSocket, so cancellation must not orphan the result it produces.
+        future = loop.run_in_executor(None, wrap)
+        try:
+            ssl_sock = await asyncio.shield(future)
+        except asyncio.CancelledError:
+            future.add_done_callback(_close_late_socket)
+            sock.close()
+            raise
     except _CertificateError:
         sock.close()
         # Raise _CertificateError directly like we do after match_hostname
