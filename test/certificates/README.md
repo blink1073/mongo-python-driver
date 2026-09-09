@@ -23,11 +23,10 @@ identify the key used to sign a certificate and the certificate's own key, respe
 No AKI or SKI. Adding AKI triggers SecTrust OCSP checks; our CA has no OCSP responder, so those
 fail with `CSSMERR_TP_CERT_SUSPENDED`. See Background below.
 
-**KMS certs**: presented by KMS mock servers, verified by Python's ssl module (OpenSSL).
-Carry both AKI (keyid form) and SKI. Python 3.13 enables `X509_V_FLAG_X509_STRICT` in
-`ssl.create_default_context()`, which requires AKI on non-root certs; by Python 3.14 (which bundles
-a newer OpenSSL) the same strict mode additionally requires SKI on non-root certs and critical
-`keyUsage` on CA certs. See Background below for the full version history.
+**KMS certs**: presented by KMS mock servers and verified by Python's ssl module (OpenSSL).
+Carry both AKI (keyid form) and SKI. These extensions are required by the strict mode that
+`ssl.create_default_context()` enables on Python 3.13+; see Background below for the full
+version history.
 
 | File | Subject | Signed by | Extensions | Purpose |
 |---|---|---|---|---|
