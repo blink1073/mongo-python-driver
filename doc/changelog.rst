@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Changes in Version 4.19.0 (unreleased)
+Changes in Version 4.19.0 (2026/XX/XX)
 --------------------------------------
 
 - Added support for routing Key Management Service (KMS) requests for
