@@ -18,7 +18,6 @@ import pytest
 
 from bson.binary import Binary
 from pymongo.encryption_options import (
-    _HAVE_PYMONGOCRYPT,
     AutoEncryptionOpts,
     HTTPProxyKMSConnect,
     KMSConnectContext,
@@ -57,7 +56,6 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
     def _pool_options():
         return PoolOptions(connect_timeout=10, socket_timeout=10, ssl_context=None)
 
-    @unittest.skipUnless(_HAVE_PYMONGOCRYPT, "pymongocrypt is not installed")
     def test_init_kms_connect_callback(self):
         opts = AutoEncryptionOpts({}, "k.d")
         self.assertIsNone(opts._kms_connect_callback)
@@ -532,7 +530,6 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         with self.assertRaises(OSError):
             _connect_kms(("kms.example.com", 443), self._pool_options(), callback, 10.0)
 
-    @unittest.skipUnless(_HAVE_PYMONGOCRYPT, "pymongocrypt is not installed")
     def test_client_encryption_accepts_callback(self):
         def callback(context):
             raise AssertionError("not called")
@@ -548,7 +545,6 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         self.addCleanup(encryption.close)
         self.assertIs(encryption._io_callbacks.opts._kms_connect_callback, callback)
 
-    @unittest.skipUnless(_HAVE_PYMONGOCRYPT, "pymongocrypt is not installed")
     def test_client_encryption_rejects_non_callable(self):
         client = self.simple_client()
         with self.assertRaisesRegex(TypeError, "kms_connect_callback must be callable"):
