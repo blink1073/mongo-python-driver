@@ -41,11 +41,12 @@ fi
 
 # Whether a toolchain Python matching UV_PYTHON was found on the host.
 PYTHON_FOUND=0
-# Prefer a toolchain (system) python over a uv-managed download: when a
-# matching toolchain interpreter is installed, put its bin directory on the
-# path and let uv pick it up.  Versions uv must install itself (pre-releases)
-# are left for the install/fetch fallback in setup-dev-env.sh.
-if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
+# UV_PYTHON may already be an absolute path, e.g. the Windows toolchain path
+# resolved on a prior invocation.  A path is already usable, so it is treated as
+# found and never triggers a download.
+if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" == /* || "$UV_PYTHON" == ?:/* ]]; then
+  PYTHON_FOUND=1
+elif [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
   case "$(uname -s)" in
     Darwin)
       if [[ "$UV_PYTHON" == *"t"* ]]; then
