@@ -212,6 +212,14 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         with self.assertRaisesRegex(OSError, "refused CONNECT"):
             HTTPProxyKMSConnect(host, port)(context)
 
+    def test_control_characters_in_kms_host_are_rejected(self):
+        # The host is configurable, so reject CR/LF before it reaches the
+        # CONNECT request or Host header.
+        callback = HTTPProxyKMSConnect("proxy.example.com", 8080)
+        context = KMSConnectContext(host="kms.example.com\r\nX-Injected: 1", port=443, timeout=10)
+        with self.assertRaisesRegex(ConfigurationError, "control characters"):
+            callback(context)
+
     def test_tls_proxy_helper_bridges_the_tunnel(self):
         # Covers the TLS-proxy path and the socketpair relay without KMS creds.
         server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -304,19 +312,20 @@ class TestKmsConnectCallbackUnit(PyMongoTestCase):
         self.assertEqual(sock.recv(64), b"echo:ping")
 
     def test_non_coroutine_callback_is_rejected(self):
-        # The async API needs a coroutine function; a plain def must not be
-        # awaited and retried.
+        # The async API needs a coroutine function; a plain def must be
+        # rejected before it runs its blocking connect on the event loop.
         if _IS_SYNC:
             raise unittest.SkipTest("a regular function is correct for the sync API")
 
-        left, right = socket.socketpair()
-        self.addCleanup(right.close)
+        entered = []
 
         def callback(context):
-            return left
+            entered.append(context)
+            return None
 
         with self.assertRaisesRegex(ConfigurationError, "coroutine function"):
             _connect_kms(("kms.example.com", 443), self._pool_options(), callback, 10.0)
+        self.assertEqual(entered, [], "invalid callback must not be entered")
 
     def test_proxy_closing_before_connect_reply_raises(self):
         listener = socket.socket()

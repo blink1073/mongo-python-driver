@@ -223,6 +223,12 @@ class HTTPProxyKMSConnect:
         return driver_side
 
     def __call__(self, context: KMSConnectContext) -> socket.socket:
+        # A configurable KMS host could inject CR/LF into the CONNECT request
+        # or Host header, so reject it before opening the proxy connection.
+        if "\r" in context.host or "\n" in context.host:
+            raise ConfigurationError(
+                f"KMS host must not contain control characters: {context.host!r}"
+            )
         # One deadline for all three phases; a timeout per phase would let the
         # total run to several times the caller's budget.
         deadline = time.monotonic() + context.timeout

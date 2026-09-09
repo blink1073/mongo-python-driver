@@ -157,22 +157,26 @@ async def _connect_kms(
             _raise_connection_failure(address, exc, timeout_details=_get_timeout_details(opts))
 
     # TLS targets address, not the peer, so verification follows the KMS host.
+    # For the async API, a plain callable would run its blocking connect on the
+    # event loop before we could reject it, so check the callback first.
+    if not _IS_SYNC:
+        callback_any: Any = kms_connect_callback
+        is_coro = inspect.iscoroutinefunction(callback_any)
+        if not is_coro and callable(callback_any):
+            is_coro = inspect.iscoroutinefunction(callback_any.__call__)
+        if not is_coro:
+            raise ConfigurationError(
+                "kms_connect_callback must be a coroutine function for the async API."
+            )
     result = kms_connect_callback(
         KMSConnectContext(host=address[0], port=cast(int, address[1]), timeout=timeout)
     )
-    # The synchronous module takes a regular function and awaits nothing.
-    if not _IS_SYNC and not inspect.isawaitable(result):
-        _close_rejected_kms_socket(result)
-        raise ConfigurationError(
-            "kms_connect_callback must be a coroutine function for the async "
-            f"API, but returned {type(result)}."
-        )
     sock = await result
     if not isinstance(sock, socket.socket) or isinstance(sock, ssl.SSLSocket):
         _close_rejected_kms_socket(sock)
         raise ConfigurationError(
             "kms_connect_callback must return a connected, unwrapped "
-            f"socket.socket, not {type(sock)}; consider HTTPProxyKMSConnect."
+            f"socket.socket, not {type(sock)}; consider AsyncHTTPProxyKMSConnect."
         )
     # wrap_socket refuses a non-blocking socket, so normalize the mode here.
     try:
@@ -187,7 +191,9 @@ async def _connect_kms(
         raise ConfigurationError(
             "kms_connect_callback must return a stream socket, not a datagram one."
         )
-    sock.settimeout(opts.socket_timeout)
+    # The callback established the tunnel and may have consumed much of the
+    # CSOT budget, so recompute the remaining time for the TLS handshake.
+    sock.settimeout(max(_csot.clamp_remaining(_KMS_CONNECT_TIMEOUT), 0.001))
     try:
         return await _async_wrap_socket_tls(sock, address, opts)
     except Exception as exc:
