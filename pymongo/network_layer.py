@@ -126,6 +126,13 @@ async def _async_blocking_socket_call(
                 # not needed since we are propagating the timeout.
                 pass
         raise
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
+        # The peer reset the connection.  On older Pythons/OpenSSL this surfaces
+        # as a clean EOF; on Python 3.15's OpenSSL it raises a raw
+        # BrokenPipeError/ConnectionResetError instead.  Map it back to a
+        # graceful close so KMS requests treat it as a retryable connection
+        # failure like they do everywhere else.
+        raise OSError("connection closed") from exc
 
 
 def sendall(sock: Union[socket.socket, _sslConn], buf: bytes) -> None:
