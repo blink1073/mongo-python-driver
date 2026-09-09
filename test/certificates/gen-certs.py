@@ -101,8 +101,13 @@ def make_key() -> rsa.RSAPrivateKey:
 
 
 def key_pem(key, password=None) -> bytes:
-    enc = BestAvailableEncryption(password) if password else NoEncryption()
-    return key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, enc)
+    if password:
+        # PKCS#8 keeps a password-protected key loadable under OpenSSL FIPS mode,
+        # whereas TraditionalOpenSSL uses EVP_BytesToKey/MD5 and may be rejected.
+        return key.private_bytes(
+            Encoding.PEM, PrivateFormat.PKCS8, BestAvailableEncryption(password)
+        )
+    return key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption())
 
 
 def cert_pem(cert) -> bytes:
@@ -131,6 +136,18 @@ def cert_text(path: Path) -> str:
         ["openssl", "x509", "-noout", "-text", "-in", str(path)],
         stderr=subprocess.DEVNULL,
     ).decode()
+
+
+def aki_key_identifier(path: Path) -> bytes | None:
+    # The .pem files are key+cert concatenated; load_pem_x509_certificate skips
+    # to the CERTIFICATE block.  Returns the AKI's keyIdentifier, or None when
+    # the extension is absent or only carries issuer/serial form.
+    cert = x509.load_pem_x509_certificate(path.read_bytes())
+    try:
+        aki = cert.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier)
+    except x509.ExtensionNotFound:
+        return None
+    return aki.value.key_identifier
 
 
 def gen_ca() -> rsa.RSAPrivateKey:
@@ -408,14 +425,12 @@ def verify() -> int:
 
     # KMS certs MUST have keyid-form AKI and SKI.
     for name in ("kms-server.pem", "kms-wrong-host.pem", "kms-expired.pem"):
-        text = cert_text(SCRIPT_DIR / name)
+        path = SCRIPT_DIR / name
+        text = cert_text(path)
         prev_errors = errors
-        if "Authority Key Identifier" not in text:
-            print(f"    {name}: ERROR: missing AKI (required for Python 3.13+)", file=sys.stderr)
-            errors += 1
-        elif "keyid:" not in text.lower() and "Key Identifier" not in text:
+        if aki_key_identifier(path) is None:
             print(
-                f"    {name}: ERROR: AKI missing keyIdentifier (OpenSSL 3.3+ strict mode requires keyid form)",
+                f"    {name}: ERROR: missing keyid-form AKI (OpenSSL 3.3+ strict mode requires keyid form)",
                 file=sys.stderr,
             )
             errors += 1
