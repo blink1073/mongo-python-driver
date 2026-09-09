@@ -202,6 +202,17 @@ class TestKmsConnectCallbackUnit(AsyncPyMongoTestCase):
         with self.assertRaisesRegex(OSError, "refused CONNECT"):
             await AsyncHTTPProxyKMSConnect(host, port)(context)
 
+        # Any 2xx status is a successful tunnel, not just HTTP/1.1 200.
+        host, port = run_stub(b"HTTP/1.0 200 Connection Established\r\n\r\n")
+        sock = await AsyncHTTPProxyKMSConnect(host, port)(context)
+        self.addCleanup(sock.close)
+        self.assertIsInstance(sock, socket.socket)
+
+        # A malformed status line must be rejected, not accepted as a 2xx.
+        host, port = run_stub(b"HTTP/1.1 2000 Evil\r\n\r\n")
+        with self.assertRaisesRegex(OSError, "refused CONNECT"):
+            await AsyncHTTPProxyKMSConnect(host, port)(context)
+
     async def test_tls_proxy_helper_bridges_the_tunnel(self):
         # Covers the TLS-proxy path and the socketpair relay without KMS creds.
         server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

@@ -169,7 +169,12 @@ class HTTPProxyKMSConnect:
             if len(response) > _MAX_CONNECT_HEADER:
                 raise OSError(f"proxy sent an oversized CONNECT response for {target}")
         status = bytes(response).split(b"\r\n", 1)[0]
-        if not status.startswith(b"HTTP/1.1 200"):
+        # A CONNECT is successful for any 2xx status, e.g. "HTTP/1.0 200" or
+        # "HTTP/1.1 201", so reject malformed lines and non-2xx statuses rather
+        # than matching a single prefix.
+        parts = status.split(b" ", 2)
+        valid = len(parts) >= 2 and parts[0].startswith(b"HTTP/") and parts[1].isdigit()
+        if not valid or not 200 <= int(parts[1]) < 300:
             raise OSError(f"proxy refused CONNECT to {target}: {status!r}")
 
     def _bridge(self, proxy: socket.socket) -> socket.socket:
