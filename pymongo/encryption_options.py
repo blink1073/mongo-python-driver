@@ -198,19 +198,22 @@ class HTTPProxyKMSConnect:
         driver_side, relay_side = socket.socketpair()
 
         def relay(src: socket.socket, dst: socket.socket) -> None:
+            # These run in daemon threads: any error, including the ValueError
+            # an SSLSocket.shutdown can raise during the teardown race, ends the
+            # relay quietly.
             try:
                 while True:
                     buf = src.recv(16384)
                     if not buf:
                         break
                     dst.sendall(buf)
-            except OSError:
+            except (OSError, ValueError):
                 pass
             finally:
                 # Send EOF to the peer instead of closing a socket it may be reading.
                 try:
                     dst.shutdown(socket.SHUT_RDWR)
-                except OSError:
+                except (OSError, ValueError):
                     pass
                 src.close()
 
@@ -270,7 +273,13 @@ class HTTPProxyKMSConnect:
         ):
             sock = socket.socket(family, socktype, proto)
             try:
+                # _remaining raises socket.timeout once the deadline passes;
+                # propagate it rather than disguise it as a connect error below.
                 sock.settimeout(_remaining(deadline))
+            except socket.timeout:
+                sock.close()
+                raise
+            try:
                 sock.connect(sockaddr)
             except OSError as exc:
                 last_error = exc

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import functools
 import inspect
@@ -197,6 +198,12 @@ def _connect_kms(
     sock.settimeout(max(_csot.clamp_remaining(_KMS_CONNECT_TIMEOUT), 0.001))
     try:
         conn = _wrap_socket_tls(sock, address, opts)
+    except asyncio.CancelledError:
+        # The executor thread may still be wrapping the socket, so close the
+        # callback's socket here; otherwise it would leak and, for a TLS proxy,
+        # leave the bridge relay threads running.
+        sock.close()
+        raise
     except Exception as exc:
         _raise_connection_failure(address, exc, timeout_details=_get_timeout_details(opts))
     conn.settimeout(max(_csot.clamp_remaining(_KMS_CONNECT_TIMEOUT), 0.001))
