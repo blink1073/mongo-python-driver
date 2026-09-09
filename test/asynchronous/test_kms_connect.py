@@ -580,6 +580,7 @@ class TestKmsConnectCallbackProse(AsyncEncryptionIntegrationTest):
         self.callback_calls.append(context)
         ctx = ssl.create_default_context(cafile=CA_PEM)
         ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         callback = AsyncHTTPProxyKMSConnect(KMS_PROXY_HOST, KMS_TLS_PROXY_PORT, ctx)
         return await callback(context)
 
@@ -595,6 +596,7 @@ class TestKmsConnectCallbackProse(AsyncEncryptionIntegrationTest):
         if tls:
             ctx = ssl.create_default_context(cafile=CA_PEM)
             ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             conn = http.client.HTTPSConnection(
                 f"{KMS_PROXY_HOST}:{KMS_TLS_PROXY_PORT}", context=ctx
             )
