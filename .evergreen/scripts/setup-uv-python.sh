@@ -25,9 +25,10 @@ if [ "Windows_NT" != "${OS:-}" ]; then
   export UV_PYTHON_PREFERENCE=system
 fi
 
-# UV_PYTHON is always a version identifier (e.g. 3.14), never a path.  uv
-# discovers the interpreter itself, so a matching toolchain (system) Python is
-# put on the path instead of pointing UV_PYTHON at it.
+# UV_PYTHON is a version identifier (e.g. 3.14) on Linux/macOS, where uv
+# discovers a matching toolchain Python from the path.  On Windows uv cannot
+# reliably resolve a bare version (its path search trips over a broken
+# Chocolatey python3 shim), so UV_PYTHON is set to the interpreter path there.
 if [ -z "${UV_PYTHON:-}" ]; then
   if [ "${REQUIRE_FIPS:-}" = "1" ]; then
     # FIPS hosts provision a specific Python; put its directory first on the
@@ -75,6 +76,9 @@ if [ -n "${UV_PYTHON:-}" ] && [[ "$UV_PYTHON" =~ ^3\.[0-9]+t?$ ]]; then
           _bin_dir="C:/python/Python${_dir}"
         fi
         if [ -f "$_bin_dir/$_exe" ]; then
+          # Windows: point UV_PYTHON at the interpreter (path-based) so uv does
+          # not probe the path and trip over a broken Chocolatey python3 shim.
+          export UV_PYTHON="$_bin_dir/$_exe"
           export PATH="$_bin_dir:$PATH"
           PYTHON_FOUND=1
         fi
