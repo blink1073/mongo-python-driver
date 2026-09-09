@@ -27,6 +27,7 @@ from asyncio import AbstractEventLoop, BaseTransport, BufferedProtocol, Future, 
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Optional,
     Union,
 )
@@ -81,12 +82,50 @@ async def async_socket_sendall(sock: Union[socket.socket, _sslConn], buf: bytes)
             # add_reader/add_writer non-blocking machinery that breaks under
             # asyncio on Python 3.15 (a peer reset surfaces as a raw
             # ConnectionResetError/BrokenPipeError before any bytes are sent).
-            await asyncio.wait_for(loop.run_in_executor(None, sock.sendall, buf), timeout=timeout)
+            await _async_blocking_socket_call(loop, sock.sendall, buf, timeout)
         else:
-            await asyncio.wait_for(loop.sock_sendall(sock, buf), timeout=timeout)  # type: ignore[arg-type]
+            # loop.sock_sendall requires a non-blocking socket.
+            sock.settimeout(0.0)
+            try:
+                await asyncio.wait_for(loop.sock_sendall(sock, buf), timeout=timeout)  # type: ignore[arg-type]
+            finally:
+                sock.settimeout(timeout)
     except asyncio.TimeoutError as exc:
         # Convert the asyncio.wait_for timeout error to socket.timeout which pool.py understands.
         raise socket.timeout("timed out") from exc
+
+
+async def _async_blocking_socket_call(
+    loop: AbstractEventLoop,
+    func: Callable[..., Any],
+    arg: Any,
+    timeout: Optional[float],
+) -> Any:
+    """Run a blocking socket operation in a worker thread with a timeout.
+
+    The worker thread cannot be interrupted, and the socket is not thread-safe
+    to close while another thread is blocked inside an SSL operation.  So the
+    future is *shielded* from cancellation: on timeout, wait for the worker to
+    finish (its blocking op is bounded by the socket's own timeout) before
+    propagating the timeout to the caller.
+    """
+    fut = asyncio.shield(loop.run_in_executor(None, func, arg))
+    try:
+        return await asyncio.wait_for(fut, timeout=timeout)
+    except asyncio.TimeoutError:
+        if timeout is not None:
+            try:
+                await asyncio.wait_for(fut, timeout=timeout)
+            except (
+                asyncio.TimeoutError,
+                asyncio.CancelledError,
+                OSError,
+                *ssl_support.BLOCKING_IO_ERRORS,
+            ):
+                # The worker finished (in error or via shutdown); its result is
+                # not needed since we are propagating the timeout.
+                pass
+        raise
 
 
 def sendall(sock: Union[socket.socket, _sslConn], buf: bytes) -> None:
@@ -114,18 +153,21 @@ async def async_receive_data_socket(
             # asyncio on Python 3.15 (a peer reset surfaces as a raw
             # ConnectionResetError/BrokenPipeError before any bytes are read).
             mv = memoryview(bytearray(length))
-            read = await asyncio.wait_for(
-                loop.run_in_executor(None, sock.recv_into, mv), timeout=timeout
-            )
+            read = await _async_blocking_socket_call(loop, sock.recv_into, mv, timeout)
             if read == 0:
                 raise OSError("connection closed")
             # KMS responses update their expected size after the first batch,
             # so only the first read is needed.
             return mv[:read]
-        return await asyncio.wait_for(
-            _async_socket_receive(sock, length, loop),  # type: ignore[arg-type]
-            timeout=timeout,
-        )
+        # loop.sock_recv_into requires a non-blocking socket.
+        sock.settimeout(0.0)
+        try:
+            return await asyncio.wait_for(
+                _async_socket_receive(sock, length, loop),  # type: ignore[arg-type]
+                timeout=timeout,
+            )
+        finally:
+            sock.settimeout(timeout)
     except asyncio.TimeoutError as err:
         raise socket.timeout("timed out") from err
 
