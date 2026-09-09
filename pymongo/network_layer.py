@@ -102,6 +102,13 @@ if sys.platform != "win32":
                 return
             fut.set_result(None)
 
+        # [KMS-DEBUG] temporary diagnostics
+        try:
+            _dbg = f"version={sock.version()!r} cipher={sock.cipher()!r}"
+        except Exception:
+            _dbg = "version=? cipher=?"
+        print(f"[KMS-DEBUG] sendall_ssl start len={len(buf)} {_dbg}", file=sys.stderr, flush=True)  # noqa: T201
+
         while sent < len(buf):
             try:
                 sent += sock.send(view[sent:])
@@ -133,6 +140,14 @@ if sys.platform != "win32":
                     finally:
                         loop.remove_reader(fd)
                         loop.remove_writer(fd)
+            except Exception as _dbg_exc:
+                # [KMS-DEBUG] temporary diagnostics
+                print(  # noqa: T201
+                    f"[KMS-DEBUG] sendall_ssl FAILED sent={sent}/{len(buf)}: {type(_dbg_exc).__name__}: {_dbg_exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                raise
 
     async def _async_socket_receive_ssl(
         conn: _sslConn, length: int, loop: AbstractEventLoop, once: Optional[bool] = False
@@ -144,6 +159,17 @@ if sys.platform != "win32":
             if fut.done():
                 return
             fut.set_result(None)
+
+        # [KMS-DEBUG] temporary diagnostics
+        try:
+            _dbg = f"version={conn.version()!r} cipher={conn.cipher()!r}"
+        except Exception:
+            _dbg = "version=? cipher=?"
+        print(  # noqa: T201
+            f"[KMS-DEBUG] receive_ssl start length={length} once={once} {_dbg}",
+            file=sys.stderr,
+            flush=True,
+        )
 
         while total_read < length:
             try:
@@ -182,6 +208,14 @@ if sys.platform != "win32":
                     finally:
                         loop.remove_reader(fd)
                         loop.remove_writer(fd)
+            except Exception as _dbg_exc:
+                # [KMS-DEBUG] temporary diagnostics
+                print(  # noqa: T201
+                    f"[KMS-DEBUG] receive_ssl FAILED total_read={total_read}/{length}: {type(_dbg_exc).__name__}: {_dbg_exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                raise
         return mv
 
 else:
