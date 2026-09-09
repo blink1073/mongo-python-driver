@@ -71,6 +71,32 @@ _POLL_TIMEOUT = 0.5
 BLOCKING_IO_ERRORS = (BlockingIOError, *BLOCKING_IO_LOOKUP_ERROR, *ssl_support.BLOCKING_IO_ERRORS)
 
 
+def _kms_debug_sock(conn: Any, where: str) -> None:  # [KMS-DEBUG] temporary diagnostics
+    try:
+        fileno = conn.fileno()
+    except Exception:
+        fileno = "?"
+    try:
+        peer = conn.getpeername()
+    except Exception:
+        peer = "?"
+    try:
+        version = conn.version()
+        cipher = conn.cipher()
+    except Exception:
+        version = cipher = "?"
+    import traceback
+
+    print(  # noqa: T201
+        f"[KMS-DEBUG] {where} fileno={fileno} peer={peer} version={version!r} cipher={cipher!r} "
+        f"type={type(conn).__name__}",
+        file=sys.stderr,
+        flush=True,
+    )
+    traceback.print_exc(file=sys.stderr)
+    print("[KMS-DEBUG] ---- end traceback ----", file=sys.stderr, flush=True)  # noqa: T201
+
+
 # These socket-based I/O methods are for KMS requests and any other network operations that do not use
 # the MongoDB wire protocol
 async def async_socket_sendall(sock: Union[socket.socket, _sslConn], buf: bytes) -> None:
@@ -103,6 +129,11 @@ if sys.platform != "win32":
             fut.set_result(None)
 
         # [KMS-DEBUG] temporary diagnostics
+        try:
+            _dbg2 = f"fileno={sock.fileno()} type={type(sock).__name__}"
+        except Exception:
+            _dbg2 = "fileno=? type=?"
+        print(f"[KMS-DEBUG] sendall_ssl start len={len(buf)} {_dbg2}", file=sys.stderr, flush=True)  # noqa: T201
         try:
             _dbg = f"version={sock.version()!r} cipher={sock.cipher()!r}"
         except Exception:
@@ -142,11 +173,7 @@ if sys.platform != "win32":
                         loop.remove_writer(fd)
             except Exception as _dbg_exc:
                 # [KMS-DEBUG] temporary diagnostics
-                print(  # noqa: T201
-                    f"[KMS-DEBUG] sendall_ssl FAILED sent={sent}/{len(buf)}: {type(_dbg_exc).__name__}: {_dbg_exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                _kms_debug_sock(sock, f"sendall_ssl FAILED sent={sent}/{len(buf)}")
                 raise
 
     async def _async_socket_receive_ssl(
@@ -162,9 +189,9 @@ if sys.platform != "win32":
 
         # [KMS-DEBUG] temporary diagnostics
         try:
-            _dbg = f"version={conn.version()!r} cipher={conn.cipher()!r}"
+            _dbg = f"version={conn.version()!r} cipher={conn.cipher()!r} fileno={conn.fileno()} type={type(conn).__name__}"
         except Exception:
-            _dbg = "version=? cipher=?"
+            _dbg = "version=? cipher=? fileno=? type=?"
         print(  # noqa: T201
             f"[KMS-DEBUG] receive_ssl start length={length} once={once} {_dbg}",
             file=sys.stderr,
@@ -210,11 +237,7 @@ if sys.platform != "win32":
                         loop.remove_writer(fd)
             except Exception as _dbg_exc:
                 # [KMS-DEBUG] temporary diagnostics
-                print(  # noqa: T201
-                    f"[KMS-DEBUG] receive_ssl FAILED total_read={total_read}/{length}: {type(_dbg_exc).__name__}: {_dbg_exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                _kms_debug_sock(conn, f"receive_ssl FAILED total_read={total_read}/{length}")
                 raise
         return mv
 

@@ -339,6 +339,22 @@ async def _async_configured_socket(
         # below.
         raise
     except (OSError, *SSLErrors) as exc:
+        # [KMS-DEBUG] temporary diagnostics
+        try:
+            import traceback
+
+            try:
+                _peer = sock.getpeername()
+            except Exception:
+                _peer = "?"
+            print(  # noqa: T201
+                f"[KMS-DEBUG] connect_ssl FAILED host={host} peer={_peer} exc={type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exc(file=sys.stderr)
+        except Exception:  # noqa: S110
+            pass
         sock.close()
         # We raise AutoReconnect for transient and permanent SSL handshake
         # failures alike. Permanent handshake failures, like protocol
