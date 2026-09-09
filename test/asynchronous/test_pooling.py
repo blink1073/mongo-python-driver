@@ -32,12 +32,18 @@ from bson.son import SON
 from pymongo import AsyncMongoClient, message, timeout
 from pymongo.errors import AutoReconnect, ConnectionFailure, DuplicateKeyError
 from pymongo.hello import HelloCompat
-from pymongo.lock import _async_create_lock
-from pymongo.monitoring import _EventListeners
+from pymongo.lock import _async_cond_wait, _async_create_lock
+from pymongo.monitoring import (
+    ConnectionCheckOutFailedEvent,
+    ConnectionCheckOutFailedReason,
+    PoolClearedEvent,
+    _EventListeners,
+)
 from test.asynchronous.utils import async_get_pool, async_joinall, flaky
 
 sys.path[0:0] = [""]
 
+from pymongo.asynchronous import pool as pool_module
 from pymongo.asynchronous.pool import Pool, PoolOptions
 from pymongo.socket_checker import SocketChecker
 from test.asynchronous import AsyncIntegrationTest, async_client_context, unittest
@@ -276,6 +282,7 @@ class TestPooling(_TestPoolingBase):
         # Bookkeeping must be rolled back, not left half-updated.
         self.assertEqual(0, cx_pool.active_sockets)
         self.assertEqual(0, cx_pool.requests)
+        self.assertEqual(0, cx_pool.operation_count)
 
     async def test_pool_removes_closed_socket(self):
         # Test that Pool removes explicitly closed socket.
@@ -397,6 +404,269 @@ class TestPooling(_TestPoolingBase):
             abs(wait_queue_timeout - duration),
             1,
             f"Waited {duration:.2f} seconds for a socket, expected {wait_queue_timeout:f}",
+        )
+
+    async def test_wait_queue_timeout_does_not_leak_operation_count(self):
+        # A checkout that fails while waiting for a slot must not leave any
+        # counter incremented. It must emit exactly one
+        # ConnectionCheckOutFailedEvent, with reason TIMEOUT.
+        wait_queue_timeout = 1  # Seconds
+        listener = CMAPListener()
+        pool = await self.create_pool(
+            max_pool_size=1,
+            wait_queue_timeout=wait_queue_timeout,
+            event_listeners=_EventListeners([listener]),
+        )
+        self.addAsyncCleanup(pool.close)
+
+        async with pool.checkout():
+            self.assertEqual(pool.operation_count, 1)
+            self.assertEqual(pool.requests, 1)
+            self.assertEqual(pool.active_sockets, 1)
+            listener.reset()
+            with self.assertRaises(ConnectionFailure):
+                async with pool.checkout():
+                    pass
+            # The failed second checkout must not have left any counter
+            # incremented for its own (failed) attempt.
+            self.assertEqual(pool.operation_count, 1)
+            self.assertEqual(pool.requests, 1)
+            self.assertEqual(pool.active_sockets, 1)
+
+            failed_events = listener.events_by_type(ConnectionCheckOutFailedEvent)
+            self.assertEqual(len(failed_events), 1, [e.reason for e in failed_events])
+            self.assertEqual(failed_events[0].reason, ConnectionCheckOutFailedReason.TIMEOUT)
+
+        self.assertEqual(pool.operation_count, 0)
+        self.assertEqual(pool.requests, 0)
+        self.assertEqual(pool.active_sockets, 0)
+
+    async def test_paused_pool_checkout_failure_does_not_leak_or_double_emit(self):
+        # A checkout that fails because the pool is paused must not leave any
+        # counter incremented, and must emit exactly one
+        # ConnectionCheckOutFailedEvent. A free slot means this exercises the
+        # fast path's readiness check.
+        listener = CMAPListener()
+        pool = await self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
+        self.addAsyncCleanup(pool.close)
+
+        await pool.reset()  # Pause the pool.
+        listener.reset()
+        with self.assertRaises(AutoReconnect):
+            async with pool.checkout():
+                pass
+
+        self.assertEqual(pool.operation_count, 0)
+        self.assertEqual(pool.requests, 0)
+        self.assertEqual(pool.active_sockets, 0)
+
+        failed_events = listener.events_by_type(ConnectionCheckOutFailedEvent)
+        self.assertEqual(len(failed_events), 1, [e.reason for e in failed_events])
+        self.assertEqual(failed_events[0].reason, ConnectionCheckOutFailedReason.CONN_ERROR)
+
+    async def test_checkout_failed_event_is_emitted_under_the_pool_lock(self):
+        # A failing readiness check must publish its
+        # ConnectionCheckOutFailedEvent while still holding the pool lock, so
+        # that _reset()'s PoolClearedEvent is always recorded first
+        # (PYTHON-3519). Listeners run synchronously inside the publish call,
+        # so this one sees whether the emitting code holds the lock.
+        locked_while_emitting = []
+        pool_ref: list = []
+
+        class LockObservingListener(CMAPListener):
+            def connection_check_out_failed(self, event):
+                locked_while_emitting.append(pool_ref[0].lock.locked())
+                super().connection_check_out_failed(event)
+
+        listener = LockObservingListener()
+        pool = await self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
+        self.addAsyncCleanup(pool.close)
+        pool_ref.append(pool)
+
+        await pool.reset()  # Pause the pool.
+        listener.reset()
+        with self.assertRaises(AutoReconnect):
+            async with pool.checkout():
+                pass
+
+        self.assertEqual(
+            [True],
+            locked_while_emitting,
+            "ConnectionCheckOutFailedEvent must be published while the pool lock is held",
+        )
+
+    async def test_checkout_failed_event_is_emitted_under_the_pool_lock_slow_path(self):
+        # Same guarantee as the test above, for the slow path: the only slot
+        # is taken, so the checkout blocks on size_cond and reset() wakes it.
+        locked_while_emitting = []
+        pool_ref: list = []
+
+        class LockObservingListener(CMAPListener):
+            def connection_check_out_failed(self, event):
+                locked_while_emitting.append(pool_ref[0].lock.locked())
+                super().connection_check_out_failed(event)
+
+        listener = LockObservingListener()
+        pool = await self.create_pool(max_pool_size=1, event_listeners=_EventListeners([listener]))
+        self.addAsyncCleanup(pool.close)
+        pool_ref.append(pool)
+
+        errors: list = []
+
+        async def blocked_checkout():
+            try:
+                async with pool.checkout():
+                    pass
+            except BaseException as exc:
+                errors.append(exc)
+
+        # The checkout must be parked on size_cond before the reset, or it
+        # would fail on the fast path and duplicate the test above. Flag it
+        # from inside the wait, while size_cond is still held.
+        parked: list = []
+        real_cond_wait = _async_cond_wait
+
+        async def flagging_cond_wait(condition, timeout):
+            if condition is pool.size_cond:
+                parked.append(True)
+            return await real_cond_wait(condition, timeout)
+
+        with patch.object(pool_module, "_async_cond_wait", flagging_cond_wait):
+            async with pool.checkout():
+                listener.reset()
+                task = ConcurrentRunner(target=blocked_checkout, name="blocked_checkout")
+                await task.start()
+
+                start = time.monotonic()
+                while not parked:  # noqa: ASYNC110, RUF100
+                    self.assertLess(
+                        time.monotonic() - start, 30, "checkout never blocked on size_cond"
+                    )
+                    await asyncio.sleep(0.01)
+
+                await pool.reset()  # Pause the pool and wake the blocked checkout.
+                await task.join(30)
+                self.assertFalse(task.is_alive(), "blocked checkout never finished")
+
+        self.assertEqual(1, len(errors), f"expected exactly one failed checkout, got {errors}")
+        self.assertIsInstance(errors[0], AutoReconnect)
+        self.assertEqual(
+            [True],
+            locked_while_emitting,
+            "ConnectionCheckOutFailedEvent must be published while the pool lock is held",
+        )
+        # PYTHON-3519: the clear that caused the failure must be recorded first.
+        self.assertEqual(
+            [PoolClearedEvent, ConnectionCheckOutFailedEvent],
+            [
+                type(event)
+                for event in listener.events_by_type(
+                    (PoolClearedEvent, ConnectionCheckOutFailedEvent)
+                )
+            ],
+        )
+
+    async def test_uncontended_checkout_pool_lock_acquisitions(self):
+        # An uncontended checkout must do its operation_count, requests and
+        # active_sockets bookkeeping in one critical section; splitting that
+        # back apart would pass every other test in this file.
+        #
+        # A warm checkout should acquire the lock twice: once for the
+        # bookkeeping, once to register the cancel context. size_cond and
+        # _max_connecting_cond are separate objects, so this does not count
+        # their blocks.
+        pool = await self.create_pool(max_pool_size=1)
+        self.addAsyncCleanup(pool.close)
+
+        # Check a connection out and back in first, so this measurement
+        # covers a warm pool and does not include connection establishment.
+        async with pool.checkout():
+            pass
+
+        acquires = 0
+        real_lock = pool.lock
+
+        class CountingLock:
+            async def __aenter__(self):
+                nonlocal acquires
+                acquires += 1
+                return await real_lock.__aenter__()
+
+            async def __aexit__(self, *args):
+                return await real_lock.__aexit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(real_lock, name)
+
+        pool.lock = CountingLock()  # type: ignore[assignment]
+        try:
+            async with pool.checkout():
+                checkout_acquires = acquires
+        finally:
+            pool.lock = real_lock
+
+        self.assertEqual(
+            2,
+            checkout_acquires,
+            f"an uncontended checkout should acquire the pool lock twice, once for "
+            f"counter bookkeeping and once to register the cancel context, got "
+            f"{checkout_acquires}",
+        )
+
+    async def test_contended_checkout_pool_lock_acquisitions(self):
+        # Same guarantee as the test above, for a checkout that waits for a
+        # slot: its bookkeeping belongs in the one size_cond critical section.
+        #
+        # Driven from a single task, because checkin() acquires the pool lock
+        # twice and would pollute the count. The slot is freed from inside the
+        # condition wait, where a real waiter would be woken.
+        pool = await self.create_pool(max_pool_size=1)
+        self.addAsyncCleanup(pool.close)
+
+        async with pool.checkout():
+            pass
+
+        # requests counts slots in use, so setting it to max_pool_size makes
+        # the fast path's slot check fail and the slow path run instead.
+        pool.requests = pool.max_pool_size
+
+        real_cond_wait = _async_cond_wait
+
+        async def releasing_cond_wait(condition, timeout):
+            if condition is pool.size_cond:
+                pool.requests = 0
+                return True
+            return await real_cond_wait(condition, timeout)
+
+        acquires = 0
+        real_lock = pool.lock
+
+        class CountingLock:
+            async def __aenter__(self):
+                nonlocal acquires
+                acquires += 1
+                return await real_lock.__aenter__()
+
+            async def __aexit__(self, *args):
+                return await real_lock.__aexit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(real_lock, name)
+
+        pool.lock = CountingLock()  # type: ignore[assignment]
+        try:
+            with patch.object(pool_module, "_async_cond_wait", releasing_cond_wait):
+                async with pool.checkout():
+                    checkout_acquires = acquires
+        finally:
+            pool.lock = real_lock
+
+        self.assertEqual(
+            2,
+            checkout_acquires,
+            f"a checkout that waited for a slot should acquire the pool lock twice, "
+            f"once for counter bookkeeping and once to register the cancel context, "
+            f"got {checkout_acquires}",
         )
 
     async def test_no_wait_queue_timeout(self):

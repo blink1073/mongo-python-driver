@@ -84,7 +84,6 @@ class TopologyDescription:
         self._server_descriptions = server_descriptions
         self._max_set_version = max_set_version
         self._max_election_id = max_election_id
-        self._candidate_servers = list(self._server_descriptions.values())
 
         # The heartbeat_frequency is used in staleness estimates.
         self._topology_settings = topology_settings
@@ -239,11 +238,6 @@ class TopologyDescription:
         return [s for s in self._server_descriptions.values() if s.is_readable]
 
     @property
-    def candidate_servers(self) -> list[ServerDescription]:
-        """List of Servers excluding deprioritized servers."""
-        return self._candidate_servers
-
-    @property
     def common_wire_version(self) -> Optional[int]:
         """Minimum of all servers' max wire versions, or None."""
         servers = self.known_servers
@@ -280,18 +274,28 @@ class TopologyDescription:
 
     def _filter_servers(
         self, deprioritized_servers: Optional[list[ServerDescription]] = None
-    ) -> None:
-        """Filter out deprioritized servers from a list of server candidates."""
+    ) -> list[ServerDescription]:
+        """Return the known servers with any deprioritized servers filtered out.
+
+        If every known server is deprioritized, all known servers are returned
+        so that selection can still make progress.
+
+        This method must not mutate ``self``. Deprioritization is specific to
+        one call, but a TopologyDescription outlives it, so filtering left on
+        the description narrows later readers such as
+        :meth:`~pymongo.synchronous.topology.Topology.get_primary`.
+
+        :param deprioritized_servers: servers to exclude, or None.
+        """
+        known_servers = self.known_servers
         if not deprioritized_servers:
-            self._candidate_servers = self.known_servers
-        else:
-            deprioritized_addresses = {sd.address for sd in deprioritized_servers}
-            filtered = [
-                server
-                for server in self.known_servers
-                if server.address not in deprioritized_addresses
-            ]
-            self._candidate_servers = filtered or self.known_servers
+            return known_servers
+
+        deprioritized_addresses = {sd.address for sd in deprioritized_servers}
+        filtered = [
+            server for server in known_servers if server.address not in deprioritized_addresses
+        ]
+        return filtered or known_servers
 
     def apply_selector(
         self,
@@ -335,10 +339,10 @@ class TopologyDescription:
             description = self.server_descriptions().get(address)
             return [description] if description and description.is_server_type_known else []
 
-        self._filter_servers(deprioritized_servers)
+        candidate_servers = self._filter_servers(deprioritized_servers)
         # Primary selection fast path.
         if self.topology_type == TOPOLOGY_TYPE.ReplicaSetWithPrimary and type(selector) is Primary:
-            for sd in self._candidate_servers:
+            for sd in candidate_servers:
                 if sd.server_type == SERVER_TYPE.RSPrimary:
                     sds = [sd]
                     if custom_selector:
@@ -355,13 +359,14 @@ class TopologyDescription:
             # No primary found, return an empty list.
             return []
 
-        selection = Selection.from_topology_description(self)
+        selection = Selection.from_topology_description(self, candidate_servers)
         # Ignore read preference for sharded clusters.
         if self.topology_type != TOPOLOGY_TYPE.Sharded:
             selection = selector(selection)
             # No suitable servers found, apply preference again but include deprioritized servers.
             if not selection and deprioritized_servers:
-                self._filter_servers(None)
+                # No candidate filtering: from_topology_description() defaults
+                # to all known servers.
                 selection = Selection.from_topology_description(self)
                 selection = selector(selection)
 
