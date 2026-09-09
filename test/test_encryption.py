@@ -16,30 +16,24 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import copy
 import http.client
 import inspect
 import json
 import os
-import pathlib
 import re
 import socket
 import socketserver
 import ssl
 import sys
 import textwrap
-import threading
-import time
 import traceback
 import uuid
 import warnings
-from asyncio.trsock import TransportSocket
 from collections.abc import Mapping
 from threading import Thread
 from typing import Any, Optional
-from unittest import mock
 
 import pytest
 
@@ -57,7 +51,7 @@ except ImportError:
 
 sys.path[0:0] = [""]
 
-from bson import BSON, DatetimeMS, Decimal128, encode, json_util
+from bson import DatetimeMS, Decimal128, encode, json_util
 from bson.binary import UUID_SUBTYPE, Binary, UuidRepresentation
 from bson.codec_options import CodecOptions
 from bson.errors import BSONError
@@ -68,7 +62,6 @@ from pymongo.cursor_shared import CursorType
 from pymongo.encryption_options import (
     _HAVE_PYMONGOCRYPT,
     AutoEncryptionOpts,
-    HTTPProxyKMSConnect,
     RangeOpts,
     StringOpts,
     TextOpts,
@@ -87,16 +80,11 @@ from pymongo.errors import (
     WriteError,
 )
 from pymongo.operations import InsertOne, ReplaceOne, UpdateOne
-from pymongo.pool_options import PoolOptions
-from pymongo.ssl_support import get_ssl_context
 from pymongo.synchronous import encryption
 from pymongo.synchronous.encryption import (
     Algorithm,
     ClientEncryption,
     QueryType,
-    _connect_kms,
-    _EncryptionIO,
-    _wrap_encryption_errors,
 )
 from pymongo.synchronous.helpers import next
 from pymongo.synchronous.mongo_client import MongoClient
@@ -107,7 +95,6 @@ from test import (
 from test.helpers_shared import (
     ALL_KMS_PROVIDERS,
     AWS_CREDS,
-    AWS_TEMP_CREDS,
     AZURE_CREDS,
     CA_PEM,
     CLIENT_PEM,
@@ -116,13 +103,11 @@ from test.helpers_shared import (
     KMIP_CREDS,
     LOCAL_MASTER_KEY,
 )
-from test.test_bulk import BulkTestBase
 from test.unified_format import generate_test_classes, get_test_path
 from test.utils_shared import (
     AllowListEventListener,
     OvertCommandListener,
     TopologyEventListener,
-    camel_to_snake_args,
     is_greenthread_patched,
     wait_until,
 )
