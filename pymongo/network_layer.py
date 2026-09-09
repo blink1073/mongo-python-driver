@@ -41,7 +41,7 @@ from pymongo.message import _UNPACK_REPLY, _OpMsg
 from pymongo.socket_checker import _errno_from_exception
 
 try:
-    from ssl import SSLSocket
+    from ssl import SSLError, SSLSocket
 
     _HAVE_SSL = True
 except ImportError:
@@ -57,6 +57,8 @@ except ImportError:
 
 from pymongo.ssl_support import (
     BLOCKING_IO_LOOKUP_ERROR,
+    BLOCKING_IO_READ_ERROR,
+    BLOCKING_IO_WRITE_ERROR,
 )
 
 if TYPE_CHECKING:
@@ -151,32 +153,23 @@ async def async_receive_data_socket(
     sock: Union[socket.socket, _sslConn], length: int
 ) -> memoryview:
     timeout = sock.gettimeout()
+    sock.settimeout(0.0)
     loop = asyncio.get_running_loop()
     try:
         if _HAVE_SSL and isinstance(sock, (SSLSocket, _sslConn)):
-            # Drive the SSL socket with a *blocking* operation in a worker thread,
-            # mirroring synchronous socket behavior.  This avoids the hand-rolled
-            # add_reader/add_writer non-blocking machinery that breaks under
-            # asyncio on Python 3.15 (a peer reset surfaces as a raw
-            # ConnectionResetError/BrokenPipeError before any bytes are read).
-            mv = memoryview(bytearray(length))
-            read = await _async_blocking_socket_call(loop, sock.recv_into, mv, timeout)
-            if read == 0:
-                raise OSError("connection closed")
-            # KMS responses update their expected size after the first batch,
-            # so only the first read is needed.
-            return mv[:read]
-        # loop.sock_recv_into requires a non-blocking socket.
-        sock.settimeout(0.0)
-        try:
+            return await asyncio.wait_for(
+                _async_socket_receive_ssl(sock, length, loop, once=True),  # type: ignore[arg-type]
+                timeout=timeout,
+            )
+        else:
             return await asyncio.wait_for(
                 _async_socket_receive(sock, length, loop),  # type: ignore[arg-type]
                 timeout=timeout,
             )
-        finally:
-            sock.settimeout(timeout)
     except asyncio.TimeoutError as err:
         raise socket.timeout("timed out") from err
+    finally:
+        sock.settimeout(timeout)
 
 
 async def _async_socket_receive(
@@ -190,6 +183,91 @@ async def _async_socket_receive(
             raise OSError("connection closed")
         bytes_read += chunk_length
     return mv
+
+
+if sys.platform != "win32":
+
+    async def _async_socket_receive_ssl(
+        conn: _sslConn, length: int, loop: AbstractEventLoop, once: Optional[bool] = False
+    ) -> memoryview:
+        mv = memoryview(bytearray(length))
+        total_read = 0
+
+        def _is_ready(fut: Future[Any]) -> None:
+            if fut.done():
+                return
+            fut.set_result(None)
+
+        while total_read < length:
+            try:
+                read = conn.recv_into(mv[total_read:])
+                if read == 0:
+                    raise OSError("connection closed")
+                # KMS responses update their expected size after the first batch,
+                # stop reading after one loop.
+                if once:
+                    return mv[:read]
+                total_read += read
+            except BLOCKING_IO_ERRORS as exc:
+                fd = conn.fileno()
+                # Check for closed socket.
+                if fd == -1:
+                    raise SSLError("Underlying socket has been closed") from None
+                if isinstance(exc, BLOCKING_IO_READ_ERROR):
+                    fut = loop.create_future()
+                    loop.add_reader(fd, _is_ready, fut)
+                    try:
+                        await fut
+                    finally:
+                        loop.remove_reader(fd)
+                if isinstance(exc, BLOCKING_IO_WRITE_ERROR):
+                    fut = loop.create_future()
+                    loop.add_writer(fd, _is_ready, fut)
+                    try:
+                        await fut
+                    finally:
+                        loop.remove_writer(fd)
+                if _HAVE_PYOPENSSL and isinstance(exc, BLOCKING_IO_LOOKUP_ERROR):
+                    fut = loop.create_future()
+                    loop.add_reader(fd, _is_ready, fut)
+                    try:
+                        loop.add_writer(fd, _is_ready, fut)
+                        await fut
+                    finally:
+                        loop.remove_reader(fd)
+                        loop.remove_writer(fd)
+        return mv
+
+else:
+    # The default Windows asyncio event loop does not support
+    # loop.add_reader/add_writer:
+    # https://docs.python.org/3/library/asyncio-platforms.html#asyncio-platform-support
+    async def _async_socket_receive_ssl(
+        conn: _sslConn, length: int, dummy: AbstractEventLoop, once: Optional[bool] = False
+    ) -> memoryview:
+        mv = memoryview(bytearray(length))
+        total_read = 0
+        # Backoff starts at 1ms, doubles on timeout up to 512ms, and halves on success
+        # down to 1ms.
+        backoff = 0.001
+        while total_read < length:
+            try:
+                read = conn.recv_into(mv[total_read:])
+                if read == 0:
+                    raise OSError("connection closed")
+                # KMS responses update their expected size after the first batch,
+                # stop reading after one loop.
+                if once:
+                    return mv[:read]
+            except BLOCKING_IO_ERRORS:
+                await asyncio.sleep(backoff)
+                read = 0
+            if read > 0:
+                backoff = max(backoff / 2, 0.001)
+            else:
+                backoff = min(backoff * 2, 0.512)
+            total_read += read
+        return mv
 
 
 _PYPY = "PyPy" in sys.version
