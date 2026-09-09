@@ -1,8 +1,4 @@
-"""Tests for the KMS connect callback and HTTP proxy support.
-
-.. note:: This module is compatible with both the synchronous and
-    asynchronous PyMongo test suites.
-"""
+"""Tests for the KMS connect callback and HTTP proxy support."""
 
 from __future__ import annotations
 
