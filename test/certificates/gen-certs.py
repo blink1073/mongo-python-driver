@@ -150,6 +150,16 @@ def aki_key_identifier(path: Path) -> bytes | None:
     return aki.value.key_identifier
 
 
+def subject_key_identifier(path: Path) -> bytes | None:
+    # Returns the certificate's SKI, or None when the extension is absent.
+    cert = x509.load_pem_x509_certificate(path.read_bytes())
+    try:
+        ski = cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+    except x509.ExtensionNotFound:
+        return None
+    return ski.value.digest
+
+
 def gen_ca() -> rsa.RSAPrivateKey:
     print("==> Generating Drivers Testing CA...")
     ca_key = make_key()
@@ -411,26 +421,43 @@ def verify() -> int:
             "    trusted-ca.pem: OK (has basicConstraints critical, keyUsage critical; no AKI/SAN)"
         )
 
-    # MongoDB certs must NOT have AKI.
+    # MongoDB certs must NOT have AKI or SKI.
     for name in ("server.pem", "client.pem"):
-        text = cert_text(SCRIPT_DIR / name)
+        path = SCRIPT_DIR / name
+        text = cert_text(path)
+        prev_errors = errors
         if "Authority Key Identifier" in text:
             print(
                 f"    {name}: ERROR: has AKI (would cause CSSMERR_TP_CERT_SUSPENDED on macOS)",
                 file=sys.stderr,
             )
             errors += 1
-        else:
-            print(f"    {name}: OK (no AKI)")
+        if "Subject Key Identifier" in text:
+            print(
+                f"    {name}: ERROR: has SKI (MongoDB certs are expected to carry no AKI or SKI)",
+                file=sys.stderr,
+            )
+            errors += 1
+        if errors == prev_errors:
+            print(f"    {name}: OK (no AKI or SKI)")
 
-    # KMS certs MUST have keyid-form AKI and SKI.
+    # KMS certs MUST have keyid-form AKI and SKI.  The AKI keyIdentifier must
+    # equal the CA's SKI, since it is derived from the CA's public key.
+    ca_ski = subject_key_identifier(SCRIPT_DIR / "ca.pem")
     for name in ("kms-server.pem", "kms-wrong-host.pem", "kms-expired.pem"):
         path = SCRIPT_DIR / name
         text = cert_text(path)
         prev_errors = errors
-        if aki_key_identifier(path) is None:
+        aki_key_id = aki_key_identifier(path)
+        if aki_key_id is None:
             print(
                 f"    {name}: ERROR: missing keyid-form AKI (OpenSSL 3.3+ strict mode requires keyid form)",
+                file=sys.stderr,
+            )
+            errors += 1
+        elif aki_key_id != ca_ski:
+            print(
+                f"    {name}: ERROR: AKI keyIdentifier does not match the CA SKI",
                 file=sys.stderr,
             )
             errors += 1
