@@ -67,6 +67,10 @@ if [ -n "${UV_PYTHON:-}" ] && [ "${PYTHON_FOUND:-}" != "1" ]; then
       fi
     fi
     export PATH="$_path_dir:$PATH"
+    # Mark the interpreter as resolved so a later setup-dev-env.sh invocation
+    # (just.sh is sourced once per just command) does not re-enter the fallback
+    # with UV_PYTHON now set to a path.
+    export PYTHON_FOUND=1
   fi
 fi
 
