@@ -1,11 +1,6 @@
 # See https://just.systems/man/en/ for instructions
 set shell := ["bash", "-c"]
 
-# On CI, env.sh (sourced by just.sh) already puts the bin dir that holds the
-# pinned uv first on PATH, so only prepend ~/.local/bin locally, where there is
-# no env.sh. This lets `just` find the pinned uv after `just install`.
-export PATH := if env_var_or_default('PYMONGO_BIN_DIR', '') != '' { env_var('PATH') } else { home_directory() + '/.local/bin:' + env_var('PATH') }
-
 # Commonly used command segments.
 typing_run := "uv run --group typing --extra aws --extra encryption --with numpy --extra ocsp --extra snappy --extra test --extra zstd"
 docs_run := "uv run --extra docs"

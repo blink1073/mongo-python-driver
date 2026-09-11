@@ -15,6 +15,16 @@ if [ -z "${CI:-}" ]; then
   bash $HERE/setup-dev-env.sh
 fi
 
+# On spawn hosts / local dev (no Evergreen CI or GitHub Actions) the pinned uv and
+# just live in ~/.local/bin, so make sure that is on PATH, adding it to .bashrc if
+# it is not already.
+if [ "${CI:-}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc" ;;
+  esac
+fi
+
 # Enable core dumps if enabled on the machine
 # Copied from https://github.com/mongodb/mongo/blob/master/etc/evergreen.yml
 if [ -f /proc/self/coredump_filter ]; then

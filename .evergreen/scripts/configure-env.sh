@@ -24,9 +24,10 @@ MONGODB_BINARIES="$DRIVERS_TOOLS/mongodb/bin"
 # drivers-tools tree.
 if [ "${CI:-}" == "true" ]; then
   PYMONGO_BIN_DIR="${TMPDIR:-/tmp}/pymongo-bin"
-# We want to use a path that's already on PATH on spawn hosts.
+# On spawn hosts and local dev, use the conventional ~/.local/bin which tools on
+# the PATH (or the shell rc) can find.
 else
-  PYMONGO_BIN_DIR=$HOME/cli_bin
+  PYMONGO_BIN_DIR=$HOME/.local/bin
 fi
 
 PATH_EXT="$MONGODB_BINARIES:$PYMONGO_BIN_DIR:$DRIVERS_TOOLS_BINARIES:\$PATH"
