@@ -25,12 +25,11 @@ if [ -f $HERE/env.sh ]; then
   . $HERE/env.sh
 fi
 
-# Add the default install path to the path before configuring uv: setup-uv-python.sh
-# calls uv, and on a machine without env.sh the tool dir must already be on PATH.
-# Prepend it so the pinned uv/just win over a different install earlier on PATH.
-if [ -z "${PYMONGO_BIN_DIR:-}" ]; then
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+# Add the install dir to the path before configuring uv, so the pinned uv/just
+# win over a different install earlier on PATH (in this parent shell, since the
+# dependency installer runs as a child process and its PATH change does not
+# propagate here).
+export PATH="${PYMONGO_BIN_DIR:-$HOME/.local/bin}:$PATH"
 
 # Handle the value for UV_PYTHON.
 . $HERE/setup-uv-python.sh

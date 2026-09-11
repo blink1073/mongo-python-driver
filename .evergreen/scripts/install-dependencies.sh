@@ -75,13 +75,13 @@ if [ -n "$_uv_bin" ]; then
         # install from a copy: Windows will not overwrite a running executable.
         _uv_tmp="$(mktemp -d)/$(basename "$_uv_bin")"
         cp "$_uv_bin" "$_uv_tmp" && chmod +x "$_uv_tmp"
-        "$_uv_tmp" tool install -q --force --from "uv${_uv_pin}" uv
+        "$_uv_tmp" tool install --no-config -q --force --from "uv${_uv_pin}" uv
         rm -rf "$(dirname "$_uv_tmp")"
         echo "Using uv at $PYMONGO_BIN_DIR/uv ($("$PYMONGO_BIN_DIR/uv" --version 2>/dev/null | head -1 | awk '{print $2}'))"
       fi
       ;;
     *)
-      uv tool install -q --force --from "uv${_uv_pin}" uv
+      uv tool install --no-config -q --force --from "uv${_uv_pin}" uv
       echo "Using uv at $PYMONGO_BIN_DIR/uv ($("$PYMONGO_BIN_DIR/uv" --version 2>/dev/null | head -1 | awk '{print $2}'))"
       ;;
   esac
@@ -99,7 +99,7 @@ if [ ! -x "$PYMONGO_BIN_DIR/just" ] && [ ! -x "$PYMONGO_BIN_DIR/just.exe" ]; the
     cp "$_toolchain_bin/just.exe" "$PYMONGO_BIN_DIR/just.exe"
     chmod +x "$PYMONGO_BIN_DIR/just.exe"
   else
-    uv tool install rust-just
+    uv tool install --no-config rust-just
   fi
 fi
 
