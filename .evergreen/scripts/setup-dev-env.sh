@@ -27,8 +27,9 @@ fi
 
 # Add the default install path to the path before configuring uv: setup-uv-python.sh
 # calls uv, and on a machine without env.sh the tool dir must already be on PATH.
+# Prepend it so the pinned uv/just win over a different install earlier on PATH.
 if [ -z "${PYMONGO_BIN_DIR:-}" ]; then
-  export PATH="$PATH:$HOME/.local/bin"
+  export PATH="$HOME/.local/bin:$PATH"
 fi
 
 # Handle the value for UV_PYTHON.

@@ -71,7 +71,12 @@ if [ -n "$_uv_bin" ]; then
     "$PYMONGO_BIN_DIR"/*)
       _uv_vers="$(uv --version 2>/dev/null | head -1 | awk '{print $2}' | sed 's/^v//')"
       if [ "uv${_uv_pin}" != "uv==${_uv_vers}" ]; then
-        uv tool install -q --force --from "uv${_uv_pin}" uv
+        # The running uv lives in our bin dir and is not the pin, so run the
+        # install from a copy: Windows will not overwrite a running executable.
+        _uv_tmp="$(mktemp -d)/$(basename "$_uv_bin")"
+        cp "$_uv_bin" "$_uv_tmp" && chmod +x "$_uv_tmp"
+        "$_uv_tmp" tool install -q --force --from "uv${_uv_pin}" uv
+        rm -rf "$(dirname "$_uv_tmp")"
         echo "Using uv at $PYMONGO_BIN_DIR/uv ($("$PYMONGO_BIN_DIR/uv" --version 2>/dev/null | head -1 | awk '{print $2}'))"
       fi
       ;;

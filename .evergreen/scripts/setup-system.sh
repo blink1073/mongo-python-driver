@@ -16,13 +16,12 @@ if [ -z "${CI:-}" ]; then
 fi
 
 # On non-CI hosts (spawn hosts, VMs such as GCP/Azure, and local dev) the pinned
-# uv and just live in ~/.local/bin, so make sure that is on PATH, adding it to
-# .bashrc if it is not already.
+# uv and just live in ~/.local/bin, so make sure a login shell finds them by
+# adding the entry to .bashrc if it is not already there. env.sh (sourced earlier)
+# already puts it on PATH, but that PATH does not persist past this SSH session.
 if [ "${CI:-}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
-  case ":$PATH:" in
-    *":$HOME/.local/bin:"*) ;;
-    *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc" ;;
-  esac
+  grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null || \
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 fi
 
 # Enable core dumps if enabled on the machine
