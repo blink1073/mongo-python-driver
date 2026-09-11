@@ -23,7 +23,7 @@ MONGODB_BINARIES="$DRIVERS_TOOLS/mongodb/bin"
 # our binaries (uv, just, ...) in a task-local dir we control, independent of the
 # drivers-tools tree.
 if [ "${CI:-}" == "true" ]; then
-  PYMONGO_BIN_DIR="${TMPDIR:-/tmp}/pymongo-bin"
+  PYMONGO_BIN_DIR="$PROJECT_DIRECTORY/.local/bin"
 # On non-CI hosts (spawn hosts, VMs such as GCP/Azure, and local dev), use the
 # conventional ~/.local/bin which tools on the PATH (or the shell rc) can find.
 else

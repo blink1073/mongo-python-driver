@@ -16,12 +16,13 @@ if [ -z "${CI:-}" ]; then
 fi
 
 # On non-CI hosts (spawn hosts, VMs such as GCP/Azure, and local dev) the pinned
-# uv and just live in ~/.local/bin, so make sure a login shell finds them by
-# adding the entry to .bashrc if it is not already there. env.sh (sourced earlier)
-# already puts it on PATH, but that PATH does not persist past this SSH session.
+# uv and just live in the sourced install dir (env.sh's PYMONGO_BIN_DIR), so make
+# sure a login shell finds them by adding it to .bashrc if it is not already
+# there. env.sh's PATH does not persist past this SSH session.
 if [ "${CI:-}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
-  grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null || \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+  _bin="${PYMONGO_BIN_DIR:-$HOME/.local/bin}"
+  grep -qF 'export PATH="'"$_bin"':$PATH"' "$HOME/.bashrc" 2>/dev/null || \
+    printf 'export PATH="%s:$PATH"\n' "$_bin" >> "$HOME/.bashrc"
 fi
 
 # Enable core dumps if enabled on the machine
