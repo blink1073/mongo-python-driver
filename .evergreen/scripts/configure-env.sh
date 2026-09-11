@@ -68,7 +68,8 @@ export PROJECT_DIRECTORY="$PROJECT_DIRECTORY"
 export CARGO_HOME="$CARGO_HOME"
 export UV_TOOL_DIR="$UV_TOOL_DIR"
 export UV_CACHE_DIR="$UV_CACHE_DIR"
-export UV_TOOL_BIN_DIR="$DRIVERS_TOOLS_BINARIES"
+# Send uv tool installs into our own bin dir, alongside the pinned uv/just.
+export UV_TOOL_BIN_DIR="$PYMONGO_BIN_DIR"
 export PYMONGO_BIN_DIR="$PYMONGO_BIN_DIR"
 export PATH="$PATH_EXT"
 # shellcheck disable=SC2154
