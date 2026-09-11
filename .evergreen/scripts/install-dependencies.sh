@@ -18,8 +18,10 @@ fi
 # uv.exe on Windows needs Windows-style paths, while bash uses the cygwin form.
 # Keep PYMONGO_BIN_DIR in the form PATH uses and give uv the Windows form.
 if [ "Windows_NT" = "${OS:-}" ]; then
-  export UV_TOOL_BIN_DIR="$(cygpath -m "$PYMONGO_BIN_DIR")"
-  export UV_TOOL_DIR="$(cygpath -m "${UV_TOOL_DIR:-$(dirname "$PYMONGO_BIN_DIR")/uv-tools}")"
+  _uv_tool_bin="$(cygpath -m "$PYMONGO_BIN_DIR")"
+  _uv_tool_dir="$(cygpath -m "${UV_TOOL_DIR:-$(dirname "$PYMONGO_BIN_DIR")/uv-tools}")"
+  export UV_TOOL_BIN_DIR="$_uv_tool_bin"
+  export UV_TOOL_DIR="$_uv_tool_dir"
 else
   export UV_TOOL_BIN_DIR="$PYMONGO_BIN_DIR"
 fi
