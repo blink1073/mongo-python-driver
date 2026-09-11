@@ -15,9 +15,9 @@ if [ -z "${CI:-}" ]; then
   bash $HERE/setup-dev-env.sh
 fi
 
-# On spawn hosts / local dev (no Evergreen CI or GitHub Actions) the pinned uv and
-# just live in ~/.local/bin, so make sure that is on PATH, adding it to .bashrc if
-# it is not already.
+# On non-CI hosts (spawn hosts, VMs such as GCP/Azure, and local dev) the pinned
+# uv and just live in ~/.local/bin, so make sure that is on PATH, adding it to
+# .bashrc if it is not already.
 if [ "${CI:-}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
   case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
