@@ -1,6 +1,11 @@
 # See https://just.systems/man/en/ for instructions
 set shell := ["bash", "-c"]
 
+# Put the dir that holds the pinned uv first on PATH for every recipe. On CI that
+# is PYMONGO_BIN_DIR (so `just install`'s uv wins over a brew/system one); locally
+# it is ~/.local/bin. This matters only when a different uv is earlier on PATH.
+export PATH := env_var_or_default('PYMONGO_BIN_DIR', home_directory() + '/.local/bin') + ':' + env_var('PATH')
+
 # Commonly used command segments.
 typing_run := "uv run --group typing --extra aws --extra encryption --with numpy --extra ocsp --extra snappy --extra test --extra zstd"
 docs_run := "uv run --extra docs"
