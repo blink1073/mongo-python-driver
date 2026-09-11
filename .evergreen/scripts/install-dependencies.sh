@@ -60,15 +60,26 @@ fi
 
 # Pin the uv binary to the version in pyproject.toml's [tool.uv] required-version.
 # Run the current uv directly: it writes into PYMONGO_BIN_DIR (a different
-# location), so nothing running is overwritten and no temp copy is needed. Always
-# run it (idempotent) so uv lands in our bin dir even when it already matches.
+# location), so nothing running is overwritten. If the running uv is already our
+# pinned bin-dir uv, skip the install to avoid overwriting it (Windows refuses to
+# overwrite a running executable); otherwise install so the pin lands in the bin
+# dir even when the discovered uv already matches.
 _uv_bin="$(command -v uv 2>/dev/null || true)"
 if [ -n "$_uv_bin" ]; then
   _uv_pin="$(awk -F'"' '/^[[:space:]]*required-version[[:space:]]*=/{print $2}' pyproject.toml)"
-  rm -f "$PYMONGO_BIN_DIR/uv" "$PYMONGO_BIN_DIR/uv.exe" \
-        "$PYMONGO_BIN_DIR/uvx" "$PYMONGO_BIN_DIR/uvx.exe"
-  uv tool install -q --force --from "uv${_uv_pin}" uv
-  echo "Using uv at $PYMONGO_BIN_DIR/uv ($("$PYMONGO_BIN_DIR/uv" --version 2>/dev/null | head -1 | awk '{print $2}'))"
+  case "$_uv_bin" in
+    "$PYMONGO_BIN_DIR"/*)
+      _uv_vers="$(uv --version 2>/dev/null | head -1 | awk '{print $2}' | sed 's/^v//')"
+      if [ "uv${_uv_pin}" != "uv==${_uv_vers}" ]; then
+        uv tool install -q --force --from "uv${_uv_pin}" uv
+        echo "Using uv at $PYMONGO_BIN_DIR/uv ($("$PYMONGO_BIN_DIR/uv" --version 2>/dev/null | head -1 | awk '{print $2}'))"
+      fi
+      ;;
+    *)
+      uv tool install -q --force --from "uv${_uv_pin}" uv
+      echo "Using uv at $PYMONGO_BIN_DIR/uv ($("$PYMONGO_BIN_DIR/uv" --version 2>/dev/null | head -1 | awk '{print $2}'))"
+      ;;
+  esac
 fi
 
 # Use just from the toolchain if available, otherwise install it. It must live in
