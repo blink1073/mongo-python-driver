@@ -34,30 +34,31 @@ jobs:
         # Github Actions doesn't support pairing matrix values together, let's improvise
         # https://github.com/github/feedback/discussions/7835#discussioncomment-1769026
         buildplat:
+        # [runner, platform, identifier, cibuildwheel-build-selector]
         # abi3 builds - single build per platform, covers GIL-enabled Python 3.11+
-        - [ubuntu-latest, "manylinux_x86_64", "cp311-abi3-manylinux_x86_64"]
-        - [ubuntu-latest, "manylinux_aarch64", "cp311-abi3-manylinux_aarch64"]
-        - [ubuntu-latest, "manylinux_ppc64le", "cp311-manylinux_ppc64le"]
-        - [ubuntu-latest, "manylinux_s390x", "cp311-manylinux_s390x"]
-        - [ubuntu-latest, "manylinux_i686", "cp311-manylinux_i686"]
-        - [windows-2022, "win_amd64", "cp311-abi3-win_amd64"]
-        - [windows-2022, "win32", "cp311-abi3-win32"]
-        - [windows-11-arm, "win_arm64", "cp311-abi3-win_arm64"]
-        - [macos-14, "macos", "cp311-abi3-macosx_*"]
+        - [ubuntu-latest, "manylinux_x86_64", "cp311-abi3-manylinux_x86_64", "cp311-manylinux_x86_64"]
+        - [ubuntu-latest, "manylinux_aarch64", "cp311-abi3-manylinux_aarch64", "cp311-manylinux_aarch64"]
+        - [ubuntu-latest, "manylinux_ppc64le", "cp311-manylinux_ppc64le", "cp311-manylinux_ppc64le"]
+        - [ubuntu-latest, "manylinux_s390x", "cp311-manylinux_s390x", "cp311-manylinux_s390x"]
+        - [ubuntu-latest, "manylinux_i686", "cp311-manylinux_i686", "cp311-manylinux_i686"]
+        - [windows-2022, "win_amd64", "cp311-abi3-win_amd64", "cp311-win_amd64"]
+        - [windows-2022, "win32", "cp311-abi3-win32", "cp311-win32"]
+        - [windows-11-arm, "win_arm64", "cp311-abi3-win_arm64", "cp311-win_arm64"]
+        - [macos-14, "macos", "cp311-abi3-macosx_*", "cp311-macosx_*"]
         # Per-version builds for 3.10
-        - [ubuntu-latest, "manylinux_x86_64", "cp310-manylinux_x86_64"]
-        - [ubuntu-latest, "manylinux_aarch64", "cp310-manylinux_aarch64"]
-        - [ubuntu-latest, "manylinux_ppc64le", "cp310-manylinux_ppc64le"]
-        - [ubuntu-latest, "manylinux_s390x", "cp310-manylinux_s390x"]
-        - [ubuntu-latest, "manylinux_i686", "cp310-manylinux_i686"]
-        - [windows-2022, "win_amd64", "cp310-win_amd64"]
-        - [windows-2022, "win32", "cp310-win32"]
-        - [windows-11-arm, "win_arm64", "cp310-win_arm64"]
-        - [macos-14, "macos", "cp310-macosx_*"]
+        - [ubuntu-latest, "manylinux_x86_64", "cp310-manylinux_x86_64", "cp310-manylinux_x86_64"]
+        - [ubuntu-latest, "manylinux_aarch64", "cp310-manylinux_aarch64", "cp310-manylinux_aarch64"]
+        - [ubuntu-latest, "manylinux_ppc64le", "cp310-manylinux_ppc64le", "cp310-manylinux_ppc64le"]
+        - [ubuntu-latest, "manylinux_s390x", "cp310-manylinux_s390x", "cp310-manylinux_s390x"]
+        - [ubuntu-latest, "manylinux_i686", "cp310-manylinux_i686", "cp310-manylinux_i686"]
+        - [windows-2022, "win_amd64", "cp310-win_amd64", "cp310-win_amd64"]
+        - [windows-2022, "win32", "cp310-win32", "cp310-win32"]
+        - [windows-11-arm, "win_arm64", "cp310-win_arm64", "cp310-win_arm64"]
+        - [macos-14, "macos", "cp310-macosx_*", "cp310-macosx_*"]
         # Free-threaded 3.14t (per-version, no stable ABI)
-        - [ubuntu-latest, "manylinux_x86_64", "cp314t-manylinux_x86_64"]
-        - [ubuntu-latest, "manylinux_aarch64", "cp314t-manylinux_aarch64"]
-        - [windows-2022, "win_amd64", "cp314t-win_amd64"]
+        - [ubuntu-latest, "manylinux_x86_64", "cp314t-manylinux_x86_64", "cp314t-manylinux_x86_64"]
+        - [ubuntu-latest, "manylinux_aarch64", "cp314t-manylinux_aarch64", "cp314t-manylinux_aarch64"]
+        - [windows-2022, "win_amd64", "cp314t-win_amd64", "cp314t-win_amd64"]
         - [macos-14, "macos", "cp314t-macosx_*"]
 
     steps:
@@ -93,10 +94,10 @@ jobs:
 
       - name: Build wheels
         env:
-          # abi3 (and cp311) builds use the plain interpreter selector; the
-          # platform/abi3 tag is derived from CIBW_ARCHS and py_limited_api
-          # (cibuildwheel rejects platform-qualified or abi3-suffixed selectors).
-          CIBW_BUILD: ${{ startsWith(matrix.buildplat[2], 'cp311-abi3') && replace(matrix.buildplat[2], 'abi3-', '') || matrix.buildplat[2] }}
+          # Abi3 rows build under the plain per-version interpreter selector
+          # (matrix.buildplat[3], e.g. "cp311-manylinux_x86_64"); the abi3 tag
+          # comes from py_limited_api with PYMONGO_BUILD_ABI3 set below.
+          CIBW_BUILD: ${{ matrix.buildplat[3] }}
           CIBW_ARCHS: ${{ matrix.buildplat[1] == 'manylinux_aarch64' && 'aarch64' || matrix.buildplat[1] == 'manylinux_ppc64le' && 'ppc64le' || matrix.buildplat[1] == 'manylinux_s390x' && 's390x' || matrix.buildplat[1] == 'manylinux_i686' && 'i686' || '' }}
           # abi3 builds set PYMONGO_BUILD_ABI3 to select the limited-API code
           # path and produce a cp311-abi3 wheel. cp310 and cp314t builds leave
