@@ -221,7 +221,7 @@ jobs:
 
       - name: Install abi3 wheel and run BSON suite
         run: |
-          python -m pip install wheelhouse/*cp311-abi3*.whl
+          python -m pip install pytest wheelhouse/*cp311-abi3*.whl
           # Leave the source tree so the freshly-installed wheel (with the C
           # extension) is imported, not the checkout's pure-Python fallback.
           cd "$RUNNER_TEMP"
@@ -265,7 +265,7 @@ jobs:
 
       - name: Install abi3 wheel and run BSON suite
         run: |
-          python -m pip install wheelhouse/*cp311-abi3*.whl
+          python -m pip install pytest wheelhouse/*cp311-abi3*.whl
           # Leave the source tree so the freshly-installed wheel (with the C
           # extension) is imported, not the checkout's pure-Python fallback.
           cd "$RUNNER_TEMP"
