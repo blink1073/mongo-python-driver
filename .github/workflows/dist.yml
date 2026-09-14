@@ -44,7 +44,7 @@ jobs:
         - [windows-2022, "win_amd64", "cp311-abi3-win_amd64", "cp311-win_amd64"]
         - [windows-2022, "win32", "cp311-abi3-win32", "cp311-win32"]
         - [windows-11-arm, "win_arm64", "cp311-abi3-win_arm64", "cp311-win_arm64"]
-        - [macos-14, "macos", "cp311-abi3-macosx_*", "cp311-macosx_*"]
+        - [macos-14, "macos", "cp311-abi3-macosx", "cp311-macosx_*"]
         # Per-version builds for 3.10
         - [ubuntu-latest, "manylinux_x86_64", "cp310-manylinux_x86_64", "cp310-manylinux_x86_64"]
         - [ubuntu-latest, "manylinux_aarch64", "cp310-manylinux_aarch64", "cp310-manylinux_aarch64"]
@@ -54,12 +54,12 @@ jobs:
         - [windows-2022, "win_amd64", "cp310-win_amd64", "cp310-win_amd64"]
         - [windows-2022, "win32", "cp310-win32", "cp310-win32"]
         - [windows-11-arm, "win_arm64", "cp310-win_arm64", "cp310-win_arm64"]
-        - [macos-14, "macos", "cp310-macosx_*", "cp310-macosx_*"]
+        - [macos-14, "macos", "cp310-macosx", "cp310-macosx_*"]
         # Free-threaded 3.14t (per-version, no stable ABI)
         - [ubuntu-latest, "manylinux_x86_64", "cp314t-manylinux_x86_64", "cp314t-manylinux_x86_64"]
         - [ubuntu-latest, "manylinux_aarch64", "cp314t-manylinux_aarch64", "cp314t-manylinux_aarch64"]
         - [windows-2022, "win_amd64", "cp314t-win_amd64", "cp314t-win_amd64"]
-        - [macos-14, "macos", "cp314t-macosx_*"]
+        - [macos-14, "macos", "cp314t-macosx"]
 
     steps:
       - name: Checkout pymongo
@@ -130,7 +130,9 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: wheel-${{ matrix.buildplat[1] }}
+          # Unique per matrix row - multiple rows share a platform (manylinux_x86_64
+          # builds cp311-abi3, cp310, cp314t), and same-name uploads overwrite.
+          name: wheel-${{ matrix.buildplat[2] }}
           path: ./wheelhouse/*.whl
           if-no-files-found: error
 
@@ -213,7 +215,7 @@ jobs:
           # Pin to this run - the wheel is rebuilt for every commit, so a
           # digest check against a prior run's artifact fails spurious.
           run-id: ${{ github.run_id }}
-          name: wheel-manylinux_x86_64
+          name: wheel-cp311-abi3-manylinux_x86_64
           path: wheelhouse
           digest-mismatch: warn
 
@@ -254,7 +256,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           run-id: ${{ github.run_id }}
-          name: wheel-manylinux_x86_64
+          name: wheel-cp311-abi3-manylinux_x86_64
           path: wheelhouse
           digest-mismatch: warn
 
