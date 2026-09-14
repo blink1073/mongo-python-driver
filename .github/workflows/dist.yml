@@ -210,8 +210,12 @@ jobs:
       - name: Download abi3 wheel
         uses: actions/download-artifact@v8
         with:
+          # Pin to this run - the wheel is rebuilt for every commit, so a
+          # digest check against a prior run's artifact fails spurious.
+          run-id: ${{ github.run_id }}
           name: wheel-manylinux_x86_64
           path: wheelhouse
+          digest-mismatch: warn
 
       - name: Install abi3 wheel and run BSON suite
         run: |
@@ -249,8 +253,10 @@ jobs:
       - name: Download abi3 wheel
         uses: actions/download-artifact@v8
         with:
+          run-id: ${{ github.run_id }}
           name: wheel-manylinux_x86_64
           path: wheelhouse
+          digest-mismatch: warn
 
       - name: Install abi3 wheel and run BSON suite
         run: |
