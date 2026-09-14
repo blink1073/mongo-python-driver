@@ -27,24 +27,60 @@
 #endif
 
 /* The limited C API (Py_LIMITED_API >= 0x030B0000) deliberately omits the
- * libc headers and the vectorcall declarations from Python.h. Those symbols
- * are still part of the stable ABI, so provide the needed declarations here. */
+ * libc headers from Python.h, so include the ones this module uses. */
 #ifdef Py_LIMITED_API
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 
-/* PEP 590 vectorcall. Declared only in the private cpython/abstract.h. */
-PyAPI_FUNC(PyObject *) PyObject_Vectorcall(
-    PyObject *callable,
-    PyObject *const *args,
-    size_t nargsf,
-    PyObject *kwnames);
+/* PEP 590 vectorcall (PyObject_Vectorcall / PyObject_VectorcallMethod) is not
+ * part of the stable ABI and is not exported by CPython's import library on
+ * Windows, so a limited-API build must call through the stable PyObject_Call*
+ * family. These helpers build a positional-args tuple; building the tuple is
+ * the portability cost. */
+static PyObject* _limited_vectorcall(PyObject* callable,
+                                     PyObject* const* args, Py_ssize_t nargs) {
+    PyObject* tup = PyTuple_New(nargs);
+    if (!tup) {
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < nargs; i++) {
+        PyObject* a = args[i];
+        Py_INCREF(a);
+        /* PyTuple_SetItem steals the reference; i is always in range. */
+        PyTuple_SetItem(tup, i, a);
+    }
+    PyObject* result = PyObject_Call(callable, tup, NULL);
+    Py_DECREF(tup);
+    return result;
+}
 
-PyAPI_FUNC(PyObject *) PyObject_VectorcallMethod(
-    PyObject *name, PyObject *const *args,
-    size_t nargsf, PyObject *kwnames);
+static PyObject* _limited_vectorcall_method(PyObject* name,
+                                            PyObject* const* args, Py_ssize_t nargs) {
+    /* PyObject_VectorcallMethod calls the method `name` on args[0] with the
+     * remaining args[1..nargs-1]. */
+    PyObject* method = PyObject_GetAttr(args[0], name);
+    if (!method) {
+        return NULL;
+    }
+    PyObject* result = _limited_vectorcall(method, args + 1, nargs - 1);
+    Py_DECREF(method);
+    return result;
+}
+#endif
+
+
+#ifdef Py_LIMITED_API
+#define PYMONGO_VECTORCALL(callable, args, nargs, kwnames) \
+    _limited_vectorcall((callable), (args), (nargs))
+#define PYMONGO_VECTORCALL_METHOD(name, args, nargs, kwnames) \
+    _limited_vectorcall_method((name), (args), (nargs))
+#else
+#define PYMONGO_VECTORCALL(callable, args, nargs, kwnames) \
+    PyObject_Vectorcall((callable), (args), (nargs), (kwnames))
+#define PYMONGO_VECTORCALL_METHOD(name, args, nargs, kwnames) \
+    PyObject_VectorcallMethod((name), (args), (nargs), (kwnames))
 #endif
 
 #include "buffer.h"
@@ -689,7 +725,7 @@ static PyObject* datetime_ms_from_millis(PyObject* self, long long millis){
         return NULL;
     }
     PyObject* args[1] = {ll_millis};
-    dt = PyObject_Vectorcall(state->DatetimeMS, args, 1, NULL);
+    dt = PYMONGO_VECTORCALL(state->DatetimeMS, args, 1, NULL);
     Py_DECREF(ll_millis);
     return dt;
 }
@@ -735,7 +771,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
         int64_t max_millis_offset = 0;
         if (options->tz_aware && options->tzinfo && options->tzinfo != Py_None) {
             PyObject* utcoffset_args[2] = {options->tzinfo, state->min_datetime};
-            PyObject* utcoffset = PyObject_VectorcallMethod(
+            PyObject* utcoffset = PYMONGO_VECTORCALL_METHOD(
                 state->_utcoffset_str, utcoffset_args, 2, NULL);
             if (utcoffset == NULL) {
                 return 0;
@@ -780,7 +816,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
             }
             Py_DECREF(utcoffset);
             utcoffset_args[1] = state->max_datetime;
-            utcoffset = PyObject_VectorcallMethod(
+            utcoffset = PYMONGO_VECTORCALL_METHOD(
                 state->_utcoffset_str, utcoffset_args, 2, NULL);
             if (utcoffset == NULL) {
                 return 0;
@@ -871,7 +907,7 @@ static PyObject* decode_datetime(PyObject* self, long long millis, const codec_o
     /* convert to local time */
     if (options->tzinfo != Py_None) {
         PyObject* astimezone_args[2] = {value, options->tzinfo};
-        PyObject* temp = PyObject_VectorcallMethod(
+        PyObject* temp = PYMONGO_VECTORCALL_METHOD(
             state->_astimezone_str, astimezone_args, 2, NULL);
         Py_DECREF(value);
         value = temp;
@@ -1081,7 +1117,7 @@ static int _load_python_objects(PyObject* module) {
     }
 
     PyObject* compile_args[1] = {empty_string};
-    compiled = PyObject_Vectorcall(re_compile, compile_args, 1, NULL);
+    compiled = PYMONGO_VECTORCALL(re_compile, compile_args, 1, NULL);
     Py_DECREF(re_compile);
     if (compiled == NULL) {
         state->REType = NULL;
@@ -1650,7 +1686,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
         {
             /* DBRef */
             PyObject* as_doc_args[1] = {value};
-            PyObject* as_doc = PyObject_VectorcallMethod(
+            PyObject* as_doc = PYMONGO_VECTORCALL_METHOD(
                 state->_as_doc_str, as_doc_args, 1, NULL);
             if (!as_doc) {
                 return 0;
@@ -1752,7 +1788,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             return 0;
         }
         PyObject* from_uuid_args[3] = {state->Binary, value, uuid_rep_obj};
-        binary_value = PyObject_VectorcallMethod(
+        binary_value = PYMONGO_VECTORCALL_METHOD(
             state->_from_uuid_str, from_uuid_args, 3, NULL);
         Py_DECREF(uuid_rep_obj);
 
@@ -1785,7 +1821,7 @@ handle_fallback:
             /* Transform types that have a registered converter.
              * A new reference is created upon transformation. */
             PyObject* converter_args[1] = {value};
-            new_value = PyObject_Vectorcall(converter, converter_args, 1, NULL);
+            new_value = PYMONGO_VECTORCALL(converter, converter_args, 1, NULL);
             if (new_value == NULL) {
                 return 0;
             }
@@ -1800,7 +1836,7 @@ handle_fallback:
      * attempted to use the fallback encoder. */
     if (!in_fallback_call && options->type_registry.has_fallback_encoder) {
         PyObject* fallback_args[1] = {value};
-        new_value = PyObject_Vectorcall(
+        new_value = PYMONGO_VECTORCALL(
             options->type_registry.fallback_encoder, fallback_args, 1, NULL);
         if (new_value == NULL) {
             // propagate any exception raised by the callback
@@ -1954,7 +1990,7 @@ handle_datetime:
     {
         long long millis;
         PyObject* utcoffset_args[1] = {value};
-        PyObject* utcoffset = PyObject_VectorcallMethod(
+        PyObject* utcoffset = PYMONGO_VECTORCALL_METHOD(
             state->_utcoffset_str, utcoffset_args, 1, NULL);
         if (utcoffset == NULL)
             return 0;
@@ -2200,7 +2236,7 @@ void handle_invalid_doc_error(PyObject* dict) {
             }
             /* Add doc to the error instance as a property. */
             PyObject* exc_args[2] = {new_msg, dict};
-            PyObject* new_exc = PyObject_Vectorcall(InvalidDocument, exc_args, 2, NULL);
+            PyObject* new_exc = PYMONGO_VECTORCALL(InvalidDocument, exc_args, 2, NULL);
             if (new_exc) {
                 exc = _transfer_traceback(exc, new_exc);
             }
@@ -2234,7 +2270,7 @@ cleanup:
             }
             // Add doc to the error instance as a property.
             PyObject* exc_args[2] = {new_msg, dict};
-            new_evalue = PyObject_Vectorcall(InvalidDocument, exc_args, 2, NULL);
+            new_evalue = PYMONGO_VECTORCALL(InvalidDocument, exc_args, 2, NULL);
             Py_DECREF(evalue);
             Py_DECREF(etype);
             etype = InvalidDocument;
@@ -2519,7 +2555,7 @@ static PyObject *_dbref_hook(PyObject* self, PyObject* value) {
         }
 
         PyObject* dbref_args[4] = {ref, id, database, value};
-        ret = PyObject_Vectorcall(state->DBRef, dbref_args, 4, NULL);
+        ret = PYMONGO_VECTORCALL(state->DBRef, dbref_args, 4, NULL);
         Py_DECREF(value);
     } else {
         ret = value;
@@ -2740,7 +2776,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                     goto uuiderror;
                 }
                 PyObject* binary_args[2] = {data, subtype_obj};
-                binary_value = PyObject_Vectorcall(state->Binary, binary_args, 2, NULL);
+                binary_value = PYMONGO_VECTORCALL(state->Binary, binary_args, 2, NULL);
                 Py_DECREF(subtype_obj);
                 if (binary_value == NULL) {
                     goto uuiderror;
@@ -2757,7 +2793,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                         goto uuiderror;
                     }
                     PyObject* as_uuid_args[2] = {binary_value, uuid_rep_obj};
-                    value = PyObject_VectorcallMethod(
+                    value = PYMONGO_VECTORCALL_METHOD(
                         state->_as_uuid_str, as_uuid_args, 2, NULL);
                     Py_DECREF(uuid_rep_obj);
                 }
@@ -2778,7 +2814,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* binary_args[2] = {data, st};
-            value = PyObject_Vectorcall(state->Binary, binary_args, 2, NULL);
+            value = PYMONGO_VECTORCALL(state->Binary, binary_args, 2, NULL);
             Py_DECREF(st);
             Py_DECREF(data);
             if (!value) {
@@ -2804,7 +2840,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* oid_args[1] = {oid_bytes};
-            value = PyObject_Vectorcall(state->ObjectId, oid_args, 1, NULL);
+            value = PYMONGO_VECTORCALL(state->ObjectId, oid_args, 1, NULL);
             Py_DECREF(oid_bytes);
             *position += 12;
             break;
@@ -2890,7 +2926,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* regex_args[2] = {pattern, flags_obj};
-            value = PyObject_Vectorcall(state->Regex, regex_args, 2, NULL);
+            value = PYMONGO_VECTORCALL(state->Regex, regex_args, 2, NULL);
             Py_DECREF(flags_obj);
             Py_DECREF(pattern);
             break;
@@ -2930,7 +2966,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* oid_args[1] = {oid_bytes};
-            id = PyObject_Vectorcall(state->ObjectId, oid_args, 1, NULL);
+            id = PYMONGO_VECTORCALL(state->ObjectId, oid_args, 1, NULL);
             Py_DECREF(oid_bytes);
             if (!id) {
                 Py_DECREF(collection);
@@ -2938,7 +2974,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
             }
             *position += 12;
             PyObject* dbref_args[2] = {collection, id};
-            value = PyObject_Vectorcall(state->DBRef, dbref_args, 2, NULL);
+            value = PYMONGO_VECTORCALL(state->DBRef, dbref_args, 2, NULL);
             Py_DECREF(collection);
             Py_DECREF(id);
             break;
@@ -2969,7 +3005,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
             }
             *position += value_length;
             PyObject* code_args[1] = {code};
-            value = PyObject_Vectorcall(state->Code, code_args, 1, NULL);
+            value = PYMONGO_VECTORCALL(state->Code, code_args, 1, NULL);
             Py_DECREF(code);
             break;
         }
@@ -3036,7 +3072,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
             *position += scope_size;
 
             PyObject* code_scope_args[2] = {code, scope};
-            value = PyObject_Vectorcall(state->Code, code_scope_args, 2, NULL);
+            value = PYMONGO_VECTORCALL(state->Code, code_scope_args, 2, NULL);
             Py_DECREF(code);
             Py_DECREF(scope);
             break;
@@ -3076,7 +3112,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* ts_args[2] = {time_obj, inc_obj};
-            value = PyObject_Vectorcall(state->Timestamp, ts_args, 2, NULL);
+            value = PYMONGO_VECTORCALL(state->Timestamp, ts_args, 2, NULL);
             Py_DECREF(time_obj);
             Py_DECREF(inc_obj);
             *position += 8;
@@ -3095,7 +3131,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* int64_args[1] = {ll_obj};
-            value = PyObject_Vectorcall(state->BSONInt64, int64_args, 1, NULL);
+            value = PYMONGO_VECTORCALL(state->BSONInt64, int64_args, 1, NULL);
             Py_DECREF(ll_obj);
             *position += 8;
             break;
@@ -3110,7 +3146,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
                 goto invalid;
             }
             PyObject* dec128_args[2] = {state->Decimal128, _bytes_obj};
-            value = PyObject_VectorcallMethod(
+            value = PYMONGO_VECTORCALL_METHOD(
                 state->_from_bid_str, dec128_args, 2, NULL);
             Py_DECREF(_bytes_obj);
             *position += 16;
@@ -3118,12 +3154,12 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
         }
     case 255:
         {
-            value = PyObject_Vectorcall(state->MinKey, NULL, 0, NULL);
+            value = PYMONGO_VECTORCALL(state->MinKey, NULL, 0, NULL);
             break;
         }
     case 127:
         {
-            value = PyObject_Vectorcall(state->MaxKey, NULL, 0, NULL);
+            value = PYMONGO_VECTORCALL(state->MaxKey, NULL, 0, NULL);
             break;
         }
     default:
@@ -3176,7 +3212,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
             converter = PyDict_GetItem(options->type_registry.decoder_map, value_type);
             if (converter != NULL) {
                 PyObject* converter_args[1] = {value};
-                PyObject* new_value = PyObject_Vectorcall(converter, converter_args, 1, NULL);
+                PyObject* new_value = PYMONGO_VECTORCALL(converter, converter_args, 1, NULL);
                 Py_DECREF(value_type);
                 Py_DECREF(value);
                 return new_value;
@@ -3395,7 +3431,7 @@ static PyObject* elements_to_dict(PyObject* self, const char* string,
             return NULL;
         }
         PyObject* raw_args[2] = {bson_bytes, options->options_obj};
-        result = PyObject_Vectorcall(options->document_class, raw_args, 2, NULL);
+        result = PYMONGO_VECTORCALL(options->document_class, raw_args, 2, NULL);
         Py_DECREF(bson_bytes);
         return result;
     }
