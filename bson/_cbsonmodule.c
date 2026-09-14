@@ -48,12 +48,47 @@ PyAPI_FUNC(PyObject *) PyObject_VectorcallMethod(
 #endif
 
 #include "buffer.h"
-#ifndef Py_LIMITED_API
-#include "time64.h"
-#endif
 
 #define _CBSON_MODULE
 #include "_cbsonmodule.h"
+
+#ifdef Py_LIMITED_API
+/* CPython's datetime C API, re-declared so a limited-API (abi3) build can use
+ * it. Include/datetime.h is entirely guarded by `#ifndef Py_LIMITED_API`, so
+ * these symbols are not declared under the limited API. The PyDateTime_CAPI
+ * struct and the "datetime.datetime_CAPI" capsule that carries it have been
+ * stable since Python 2.4; numpy and pandas consume this same capsule (via
+ * PyDateTime_IMPORT) in their non-limited builds, so it is a capsule-stability
+ * precedent rather than an abi3 one. Because the layout is frozen and fetched
+ * by name at runtime (no link-time symbol in the .so), an abi3 build can
+ * re-declare it and call DateTime_FromDateAndTime directly, avoiding the
+ * 7-arg constructor and its seven PyLong allocations. This is a non-stable-ABI
+ * usage relying on a capsule that has not changed in ~20 years; if CPython
+ * ever changes it, the abi3 wheel is exercised against the new version in CI
+ * during that release's beta phase, so a portability regression is caught. */
+typedef struct {
+    PyTypeObject *DateType;
+    PyTypeObject *DateTimeType;
+    PyTypeObject *TimeType;
+    PyTypeObject *DeltaType;
+    PyTypeObject *TZInfoType;
+    PyObject *TimeZone_UTC;
+    PyObject *(*Date_FromDate)(int, int, int, PyTypeObject*);
+    PyObject *(*DateTime_FromDateAndTime)(
+        int, int, int, int, int, int, int, PyObject*, PyTypeObject*);
+    PyObject *(*Time_FromTime)(int, int, int, int, PyObject*, PyTypeObject*);
+    PyObject *(*Delta_FromDelta)(int, int, int, int, PyTypeObject*);
+    PyObject *(*TimeZone_FromTimeZone)(PyObject*, PyObject*);
+    PyObject *(*DateTime_FromTimestamp)(PyObject*, PyObject*, PyObject*);
+    PyObject *(*Date_FromTimestamp)(PyObject*, PyObject*);
+    PyObject *(*DateTime_FromDateAndTimeAndFold)(
+        int, int, int, int, int, int, int, PyObject*, int, PyTypeObject*);
+    PyObject *(*Time_FromTimeAndFold)(
+        int, int, int, int, PyObject*, int, PyTypeObject*);
+} _PyDateTime_CAPI;
+
+#define _PYDATETIME_CAPSULE_NAME "datetime.datetime_CAPI"
+#endif
 
 /* New module state and initialization code.
  * See the module-initialization-and-state
@@ -114,14 +149,10 @@ struct module_state {
 #ifdef Py_LIMITED_API
     PyObject* datetime_type;
     PyObject* timedelta_type;
-    PyObject* _hour_str;
-    PyObject* _minute_str;
-    PyObject* _second_str;
-    PyObject* _microsecond_str;
+    _PyDateTime_CAPI* datetime_capi;
     PyObject* _days_str;
     PyObject* _seconds_str;
     PyObject* _microseconds_delta_str;
-    PyObject* _toordinal_str;
 #endif
     int64_t min_millis;
     int64_t max_millis;
@@ -152,10 +183,9 @@ struct module_state {
 #define DATETIME_AUTO 4
 #define PYTHON_3_12 0x030C0000
 
-#ifdef Py_LIMITED_API
-/* Convert a days-since-epoch value to a civil (y, m, d) tuple. Decoding uses
- * this together with the 7-arg datetime constructor; the limited API cannot
- * read the PyDateTime C struct directly. */
+/* Convert a days-since-epoch value to a civil (y, m, d) tuple. Used by both the
+ * limited and non-limited datetime decode paths, replacing the loop-based
+ * time64 library with O(1) closed-form arithmetic (Hinnant). */
 static void civil_from_days(int64_t z, int *y, int *m, int *d) {
     z += 719468;
     int64_t era = (z >= 0 ? z : z - 146096) / 146097;
@@ -170,6 +200,56 @@ static void civil_from_days(int64_t z, int *y, int *m, int *d) {
     *m = (int)mm;
     *d = (int)dd;
 }
+
+/* Inverse of civil_from_days: days since 1970-01-01 for a civil date. */
+static int64_t days_from_civil(int64_t y, int m, int d) {
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    int64_t yoe = y - era * 400;
+    int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+#ifdef Py_LIMITED_API
+/* Mirror of CPython's datetime object field layout (see _PyDateTime_CAPI).
+ * Include/datetime.h defines _PyTZINFO_HEAD as PyObject_HEAD + a Py_hash_t
+ * hashcode + a hastzinfo flag; both the naive (_PyDateTime_BaseDateTime) and
+ * aware (PyDateTime_DateTime) layouts place data[] immediately after that
+ * head, so reading data[0..9] is layout-agnostic. These read the same bytes
+ * as PyDateTime_GET_YEAR / PyDateTime_DATE_GET_HOUR, so datetimes are encoded
+ * from their raw fields with no getattr calls. */
+typedef struct {
+    PyObject_HEAD
+    Py_hash_t hashcode;
+    char hastzinfo;
+    unsigned char data[10];
+} _PyDateTime_Fields;
+
+#define _DT_YEAR(o)         ((((_PyDateTime_Fields*)(o))->data[0] << 8) | ((_PyDateTime_Fields*)(o))->data[1])
+#define _DT_MONTH(o)        ((_PyDateTime_Fields*)(o))->data[2]
+#define _DT_DAY(o)          ((_PyDateTime_Fields*)(o))->data[3]
+#define _DT_HOUR(o)         ((_PyDateTime_Fields*)(o))->data[4]
+#define _DT_MINUTE(o)       ((_PyDateTime_Fields*)(o))->data[5]
+#define _DT_SECOND(o)       ((_PyDateTime_Fields*)(o))->data[6]
+#define _DT_MICROSECOND(o)  (((((_PyDateTime_Fields*)(o))->data[7] << 16) | (((_PyDateTime_Fields*)(o))->data[8] << 8)) | ((_PyDateTime_Fields*)(o))->data[9])
+#endif
+
+/* Check for an exact type first, then fall back to the subclass check.
+ *
+ * In the limited API the PyXxx_Check subclass macros expand through
+ * PyType_FastSubclass -> PyType_HasFeature -> PyType_GetFlags(), which is a
+ * function call, whereas Py_IS_TYPE is a direct pointer compare. Exact
+ * built-in types are far more common than subclasses, so short-circuiting on
+ * the exact match avoids the out-of-line call and is byte-identical in
+ * behavior. The non-limited build already inlines the subclass check, so it
+ * is left unchanged. */
+#ifdef Py_LIMITED_API
+#define _CBSON_EXACT_OR_SUBCLASS(obj, typetok, typeobj) \
+    (Py_IS_TYPE((obj), (typeobj)) || Py##typetok##_Check((obj)))
+#else
+#define _CBSON_EXACT_OR_SUBCLASS(obj, typetok, typeobj) \
+    (Py##typetok##_Check((obj)))
 #endif
 
 /* Converts integer to its string representation in decimal notation. */
@@ -393,22 +473,12 @@ static PyObject* datetime_from_millis(PyObject* self, long long millis) {
     int mm_ = (int)((sec_of_day % 3600) / 60);
     int ss = (int)(sec_of_day % 60);
 
-    PyObject* args[7];
-    args[0] = PyLong_FromLong(y);
-    args[1] = PyLong_FromLong(mo);
-    args[2] = PyLong_FromLong(d);
-    args[3] = PyLong_FromLong(hh);
-    args[4] = PyLong_FromLong(mm_);
-    args[5] = PyLong_FromLong(ss);
-    args[6] = PyLong_FromLong(microseconds);
-    for (int i = 0; i < 7; i++) {
-        if (!args[i]) {
-            for (int j = 0; j < i; j++) Py_DECREF(args[j]);
-            return NULL;
-        }
-    }
-    datetime = PyObject_Vectorcall(state->datetime_type, args, 7, NULL);
-    for (int i = 0; i < 7; i++) Py_DECREF(args[i]);
+    /* Construct the datetime directly through CPython's frozen datetime C API
+     * instead of a 7-arg constructor call. This avoids allocating seven PyLongs
+     * per value and the type-call dispatch; see the _PyDateTime_CAPI comment. */
+    datetime = state->datetime_capi->DateTime_FromDateAndTime(
+        y, mo, d, hh, mm_, ss, microseconds,
+        Py_None, state->datetime_capi->DateTimeType);
     if(!datetime) {
         #if PY_VERSION_HEX >= PYTHON_3_12
             PyObject *exc = PyErr_GetRaisedException();
@@ -497,17 +567,18 @@ static PyObject* datetime_from_millis(long long millis) {
     PyObject* datetime = NULL;
     int diff = (int)(((millis % 1000) + 1000) % 1000);
     int microseconds = diff * 1000;
-    Time64_T seconds = (millis - diff) / 1000;
-    struct TM timeinfo;
-    cbson_gmtime64_r(&seconds, &timeinfo);
+    int64_t seconds = (millis - diff) / 1000;
+    /* Handle negative seconds with floor division */
+    int64_t days = seconds / 86400;
+    int64_t sec_of_day = seconds - days * 86400;
+    if (sec_of_day < 0) { sec_of_day += 86400; days -= 1; }
+    int y, mo, d;
+    civil_from_days(days, &y, &mo, &d);
+    int hh = (int)(sec_of_day / 3600);
+    int mm_ = (int)((sec_of_day % 3600) / 60);
+    int ss = (int)(sec_of_day % 60);
 
-    datetime = PyDateTime_FromDateAndTime(timeinfo.tm_year + 1900,
-                                          timeinfo.tm_mon + 1,
-                                          timeinfo.tm_mday,
-                                          timeinfo.tm_hour,
-                                          timeinfo.tm_min,
-                                          timeinfo.tm_sec,
-                                          microseconds);
+    datetime = PyDateTime_FromDateAndTime(y, mo, d, hh, mm_, ss, microseconds);
     if(!datetime) {
         #if PY_VERSION_HEX >= PYTHON_3_12
             PyObject *exc = PyErr_GetRaisedException();
@@ -567,56 +638,38 @@ static PyObject* datetime_from_millis(long long millis) {
 
 #ifdef Py_LIMITED_API
 static long long millis_from_datetime(struct module_state* state, PyObject* datetime) {
+    /* Read the datetime's raw fields directly (see _PyDateTime_Fields); this
+     * mirrors the PyDateTime_GET_YEAR / PyDateTime_DATE_GET_HOUR family and
+     * avoids the per-field getattr calls the limited API otherwise forces.
+     * days_from_civil() does the calendar math in O(1). */
+    long long y = _DT_YEAR(datetime);
+    long long mo = _DT_MONTH(datetime);
+    long long d = _DT_DAY(datetime);
+    long long hh = _DT_HOUR(datetime);
+    long long mm_ = _DT_MINUTE(datetime);
+    long long ss = _DT_SECOND(datetime);
+    long long us = _DT_MICROSECOND(datetime);
     long long millis;
-    long hh, mm_, ss, us;
 
-    /* toordinal() returns days since 0001-01-01 in one call, so we avoid
-     * the separate year/month/day lookups and the civil calendar math.
-     * Days since the Unix epoch is toordinal() - 719163. */
-    PyObject* ord_args[1] = {datetime};
-    PyObject* ordinal = PyObject_VectorcallMethod(state->_toordinal_str, ord_args, 1, NULL);
-    if (!ordinal) {
-        return -1;
-    }
-    long long days = PyLong_AsLong(ordinal);
-    Py_DECREF(ordinal);
-    if (days == -1 && PyErr_Occurred()) {
-        return -1;
-    }
-
-    PyObject* attr;
-#define GET_LONG_FIELD(obj, name_str, out) \
-    attr = PyObject_GetAttr(obj, state->name_str); \
-    if (!attr) return -1; \
-    out = PyLong_AsLong(attr); \
-    Py_DECREF(attr); \
-    if (out == -1 && PyErr_Occurred()) return -1;
-
-    GET_LONG_FIELD(datetime, _hour_str, hh);
-    GET_LONG_FIELD(datetime, _minute_str, mm_);
-    GET_LONG_FIELD(datetime, _second_str, ss);
-    GET_LONG_FIELD(datetime, _microsecond_str, us);
-#undef GET_LONG_FIELD
-
-    millis = (days - 719163) * 86400000LL + (int64_t)hh * 3600000LL +
-             (int64_t)mm_ * 60000LL + (int64_t)ss * 1000LL + us / 1000;
+    millis = days_from_civil(y, (int)mo, (int)d) * 86400000LL +
+             hh * 3600000LL + mm_ * 60000LL + ss * 1000LL + us / 1000;
     return millis;
 }
 #else
 static long long millis_from_datetime(PyObject* datetime) {
-    struct TM timeinfo;
-    long long millis;
+    /* Read the datetime's raw fields via the PyDateTime_GET_* macros and do the
+     * calendar math with O(1) days_from_civil instead of the loop-based time64
+     * library; see the shared civil_from_days/days_from_civil helpers. */
+    long long y = PyDateTime_GET_YEAR(datetime);
+    long long mo = PyDateTime_GET_MONTH(datetime);
+    long long d = PyDateTime_GET_DAY(datetime);
+    long long hh = PyDateTime_DATE_GET_HOUR(datetime);
+    long long mm_ = PyDateTime_DATE_GET_MINUTE(datetime);
+    long long ss = PyDateTime_DATE_GET_SECOND(datetime);
+    long long us = PyDateTime_DATE_GET_MICROSECOND(datetime);
 
-    timeinfo.tm_year = PyDateTime_GET_YEAR(datetime) - 1900;
-    timeinfo.tm_mon = PyDateTime_GET_MONTH(datetime) - 1;
-    timeinfo.tm_mday = PyDateTime_GET_DAY(datetime);
-    timeinfo.tm_hour = PyDateTime_DATE_GET_HOUR(datetime);
-    timeinfo.tm_min = PyDateTime_DATE_GET_MINUTE(datetime);
-    timeinfo.tm_sec = PyDateTime_DATE_GET_SECOND(datetime);
-
-    millis = cbson_timegm64(&timeinfo) * 1000;
-    millis += PyDateTime_DATE_GET_MICROSECOND(datetime) / 1000;
-    return millis;
+    return days_from_civil(y, (int)mo, (int)d) * 86400000LL +
+           hh * 3600000LL + mm_ * 60000LL + ss * 1000LL + us / 1000;
 }
 #endif /* Py_LIMITED_API */
 
@@ -886,7 +939,7 @@ static int write_unicode(buffer_t buffer, PyObject* py_string) {
 static int write_string(buffer_t buffer, PyObject* py_string) {
     int size;
     const char* data;
-    if (PyUnicode_Check(py_string)){
+    if (_CBSON_EXACT_OR_SUBCLASS(py_string, Unicode, &PyUnicode_Type)){
         return write_unicode(buffer, py_string);
     }
     data = PyBytes_AsString(py_string);
@@ -1371,7 +1424,7 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
      * of PyObject_HasAttr/PyObject_GetAttr calls for the most common cases.
      */
     if (PyUnicode_CheckExact(value) || PyLong_CheckExact(value) || PyFloat_CheckExact(value) ||
-        PyBool_Check(value) || PyDict_CheckExact(value) || PyList_CheckExact(value) ||
+        _CBSON_EXACT_OR_SUBCLASS(value, Bool, &PyBool_Type) || PyDict_CheckExact(value) || PyList_CheckExact(value) ||
         PyTuple_CheckExact(value) || PyBytes_CheckExact(value) || value == Py_None) {
         type = 0;
     } else {
@@ -1628,16 +1681,157 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
 
     /* No _type_marker attribute or not one of our types. */
 
-    if (PyBool_Check(value)) {
+    PyTypeObject* vtype = Py_TYPE(value);
+
+    /* Fast exact-type dispatch. Py_TYPE(value) is a single deref available in
+     * both the limited and non-limited builds; comparing it against the built-in
+     * type objects (and the cached datetime/regex types) is a cheap pointer
+     * compare, whereas the subclass checks (PyXxx_Check) expand to an out-of-line
+     * PyType_GetFlags() call under the limited API. Subclasses fall through to the
+     * checks below, reusing the same handlers. */
+    if (vtype == &PyUnicode_Type) goto handle_unicode;
+    if (vtype == &PyDict_Type) goto handle_dict;
+    if (vtype == &PyBool_Type) goto handle_bool;
+    if (vtype == &PyLong_Type) goto handle_long;
+    if (vtype == &PyFloat_Type) goto handle_float;
+    if (value == Py_None) goto handle_none;
+    if (vtype == &PyList_Type || vtype == &PyTuple_Type) goto handle_list;
+    if (vtype == &PyBytes_Type) goto handle_bytes;
+#ifdef Py_LIMITED_API
+    if (vtype == (PyTypeObject*)state->datetime_type) goto handle_datetime;
+#else
+    if (vtype == (PyTypeObject*)PyDateTimeAPI->DateTimeType) goto handle_datetime;
+#endif
+    if (vtype == (PyTypeObject*)state->REType) goto handle_regex;
+
+    /* Subclass fallback (an exact built-in did not match). */
+    if (PyBool_Check(value)) goto handle_bool;
+    if (PyLong_Check(value)) goto handle_long;
+    if (PyFloat_Check(value)) goto handle_float;
+    if (PyDict_Check(value)) goto handle_dict;
+    if (PyList_Check(value) || PyTuple_Check(value)) goto handle_list;
+    if (PyBytes_Check(value)) goto handle_bytes;
+    if (PyUnicode_Check(value)) goto handle_unicode;
+#ifdef Py_LIMITED_API
+    if (Py_IS_TYPE(value, (PyTypeObject*)state->datetime_type) ||
+        PyObject_IsInstance(value, state->datetime_type)) goto handle_datetime;
+#else
+    if (PyDateTime_Check(value)) goto handle_datetime;
+#endif
+#ifdef Py_LIMITED_API
+    if (Py_IS_TYPE(value, (PyTypeObject*)state->REType) ||
+        PyObject_IsInstance(value, state->REType)) goto handle_regex;
+#else
+    if (PyObject_TypeCheck(value, state->REType)) goto handle_regex;
+#endif
+    if (PyObject_IsInstance(value, state->Mapping)) {
+        /* PyObject_IsInstance returns -1 on error */
+        if (PyErr_Occurred()) {
+            return 0;
+        }
+        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
+        return write_dict(self, buffer, value, check_keys, options, 0);
+    } else if (PyObject_IsInstance(value, state->UUID)) {
+        PyObject* binary_value = NULL;
+        PyObject *uuid_rep_obj = NULL;
+        int result;
+
+        /* PyObject_IsInstance returns -1 on error */
+        if (PyErr_Occurred()) {
+            return 0;
+        }
+
+        if (!(uuid_rep_obj = PyLong_FromLong(options->uuid_rep))) {
+            return 0;
+        }
+        PyObject* from_uuid_args[3] = {state->Binary, value, uuid_rep_obj};
+        binary_value = PyObject_VectorcallMethod(
+            state->_from_uuid_str, from_uuid_args, 3, NULL);
+        Py_DECREF(uuid_rep_obj);
+
+        if (binary_value == NULL) {
+            return 0;
+        }
+
+        result = _write_element_to_buffer(self, buffer,
+                                          type_byte, binary_value,
+                                          check_keys, options,
+                                          in_custom_call,
+                                          in_fallback_call);
+        Py_DECREF(binary_value);
+        return result;
+    }
+
+handle_fallback:
+    /* Try a custom encoder if one is provided and we have not already
+     * attempted to use a type encoder. */
+    if (!in_custom_call && !options->type_registry.is_encoder_empty) {
+        PyObject* value_type = NULL;
+        PyObject* converter = NULL;
+        value_type = PyObject_Type(value);
+        if (value_type == NULL) {
+            return 0;
+        }
+        converter = PyDict_GetItem(options->type_registry.encoder_map, value_type);
+        Py_XDECREF(value_type);
+        if (converter != NULL) {
+            /* Transform types that have a registered converter.
+             * A new reference is created upon transformation. */
+            PyObject* converter_args[1] = {value};
+            new_value = PyObject_Vectorcall(converter, converter_args, 1, NULL);
+            if (new_value == NULL) {
+                return 0;
+            }
+            retval = write_element_to_buffer(self, buffer, type_byte, new_value,
+                                             check_keys, options, 1, 0);
+            Py_XDECREF(new_value);
+            return retval;
+        }
+    }
+
+    /* Try the fallback encoder if one is provided and we have not already
+     * attempted to use the fallback encoder. */
+    if (!in_fallback_call && options->type_registry.has_fallback_encoder) {
+        PyObject* fallback_args[1] = {value};
+        new_value = PyObject_Vectorcall(
+            options->type_registry.fallback_encoder, fallback_args, 1, NULL);
+        if (new_value == NULL) {
+            // propagate any exception raised by the callback
+            return 0;
+        }
+        retval = write_element_to_buffer(self, buffer, type_byte, new_value,
+                                         check_keys, options, 0, 1);
+        Py_XDECREF(new_value);
+        return retval;
+    }
+
+    /* We can't determine value's type. Fail. */
+    _set_cannot_encode(value);
+    return 0;
+
+handle_unicode:
+    {
+        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x02;
+        return write_unicode(buffer, value);
+    }
+handle_dict:
+    {
+        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
+        return write_dict(self, buffer, value, check_keys, options, 0);
+    }
+handle_bool:
+    {
         const char c = (value == Py_True) ? 0x01 : 0x00;
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x08;
         return buffer_write_bytes(buffer, &c, 1);
     }
-    else if (PyLong_Check(value)) {
+handle_long:
+    {
         const long long long_long_value = PyLong_AsLongLong(value);
         if (long_long_value == -1 && PyErr_Occurred()) {
             /* Ignore error and give the fallback_encoder a chance. */
             PyErr_Clear();
+            goto handle_fallback;
         } else if (-2147483648LL <= long_long_value && long_long_value <= 2147483647LL) {
             *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x10;
             return buffer_write_int32(buffer, (int32_t)long_long_value);
@@ -1645,23 +1839,27 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x12;
             return buffer_write_int64(buffer, (int64_t)long_long_value);
         }
-    } else if (PyFloat_Check(value)) {
+    }
+handle_float:
+    {
         const double d = PyFloat_AsDouble(value);
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x01;
         return buffer_write_double(buffer, d);
-    } else if (value == Py_None) {
+    }
+handle_none:
+    {
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x0A;
         return 1;
-    } else if (PyDict_Check(value)) {
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
-        return write_dict(self, buffer, value, check_keys, options, 0);
-    } else if ((is_list = PyList_Check(value)) || PyTuple_Check(value)) {
+    }
+handle_list:
+    {
         Py_ssize_t items, i;
         int start_position,
             length_location,
             length;
         char zero = 0;
 
+        is_list = PyList_Check(value);
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x04;
         start_position = pymongo_buffer_get_position(buffer);
 
@@ -1722,8 +1920,9 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
         buffer_write_int32_at_position(
             buffer, length_location, (int32_t)length);
         return 1;
-    /* Python3 special case. Store bytes as BSON binary subtype 0. */
-    } else if (PyBytes_Check(value)) {
+    }
+handle_bytes:
+    {
         char subtype = 0;
         int size;
         Py_ssize_t ssize;
@@ -1743,15 +1942,9 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
             return 0;
         }
         return 1;
-    } else if (PyUnicode_Check(value)) {
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x02;
-        return write_unicode(buffer, value);
-#ifdef Py_LIMITED_API
-    } else if (Py_IS_TYPE(value, (PyTypeObject*)state->datetime_type) ||
-               PyObject_IsInstance(value, state->datetime_type)) {
-#else
-    } else if (PyDateTime_Check(value)) {
-#endif
+    }
+handle_datetime:
+    {
         long long millis;
         PyObject* utcoffset_args[1] = {value};
         PyObject* utcoffset = PyObject_VectorcallMethod(
@@ -1784,97 +1977,13 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
         Py_DECREF(utcoffset);
         *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x09;
         return buffer_write_int64(buffer, (int64_t)millis);
-#ifdef Py_LIMITED_API
-    } else if (Py_IS_TYPE(value, (PyTypeObject*)state->REType) ||
-               PyObject_IsInstance(value, state->REType)) {
-#else
-    } else if (PyObject_TypeCheck(value, state->REType)) {
-#endif
+    }
+handle_regex:
+    {
         return _write_regex_to_buffer(buffer, type_byte, value, state->_flags_str, state->_pattern_str);
-    } else if (PyObject_IsInstance(value, state->Mapping)) {
-        /* PyObject_IsInstance returns -1 on error */
-        if (PyErr_Occurred()) {
-            return 0;
-        }
-        *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
-        return write_dict(self, buffer, value, check_keys, options, 0);
-    } else if (PyObject_IsInstance(value, state->UUID)) {
-        PyObject* binary_value = NULL;
-        PyObject *uuid_rep_obj = NULL;
-        int result;
-
-        /* PyObject_IsInstance returns -1 on error */
-        if (PyErr_Occurred()) {
-            return 0;
-        }
-
-        if (!(uuid_rep_obj = PyLong_FromLong(options->uuid_rep))) {
-            return 0;
-        }
-        PyObject* from_uuid_args[3] = {state->Binary, value, uuid_rep_obj};
-        binary_value = PyObject_VectorcallMethod(
-            state->_from_uuid_str, from_uuid_args, 3, NULL);
-        Py_DECREF(uuid_rep_obj);
-
-        if (binary_value == NULL) {
-            return 0;
-        }
-
-        result = _write_element_to_buffer(self, buffer,
-                                          type_byte, binary_value,
-                                          check_keys, options,
-                                          in_custom_call,
-                                          in_fallback_call);
-        Py_DECREF(binary_value);
-        return result;
     }
-
-    /* Try a custom encoder if one is provided and we have not already
-     * attempted to use a type encoder. */
-    if (!in_custom_call && !options->type_registry.is_encoder_empty) {
-        PyObject* value_type = NULL;
-        PyObject* converter = NULL;
-        value_type = PyObject_Type(value);
-        if (value_type == NULL) {
-            return 0;
-        }
-        converter = PyDict_GetItem(options->type_registry.encoder_map, value_type);
-        Py_XDECREF(value_type);
-        if (converter != NULL) {
-            /* Transform types that have a registered converter.
-             * A new reference is created upon transformation. */
-            PyObject* converter_args[1] = {value};
-            new_value = PyObject_Vectorcall(converter, converter_args, 1, NULL);
-            if (new_value == NULL) {
-                return 0;
-            }
-            retval = write_element_to_buffer(self, buffer, type_byte, new_value,
-                                             check_keys, options, 1, 0);
-            Py_XDECREF(new_value);
-            return retval;
-        }
-    }
-
-    /* Try the fallback encoder if one is provided and we have not already
-     * attempted to use the fallback encoder. */
-    if (!in_fallback_call && options->type_registry.has_fallback_encoder) {
-        PyObject* fallback_args[1] = {value};
-        new_value = PyObject_Vectorcall(
-            options->type_registry.fallback_encoder, fallback_args, 1, NULL);
-        if (new_value == NULL) {
-            // propagate any exception raised by the callback
-            return 0;
-        }
-        retval = write_element_to_buffer(self, buffer, type_byte, new_value,
-                                         check_keys, options, 0, 1);
-        Py_XDECREF(new_value);
-        return retval;
-    }
-
-    /* We can't determine value's type. Fail. */
-    _set_cannot_encode(value);
-    return 0;
 }
+
 
 static int check_key_name(const char* name, int name_length) {
 
@@ -1947,7 +2056,7 @@ int decode_and_write_pair(PyObject* self, buffer_t buffer,
     const char* data;
     int size;
     Py_ssize_t ssize;
-    if (PyUnicode_Check(key)) {
+    if (_CBSON_EXACT_OR_SUBCLASS(key, Unicode, &PyUnicode_Type)) {
         /* PyUnicode_AsUTF8AndSize returns a pointer to the key's cached UTF-8
          * buffer, avoiding the temporary bytes object allocation that
          * PyUnicode_AsUTF8String performs for the key of every element. */
@@ -2133,7 +2242,7 @@ int write_dict(PyObject* self, buffer_t buffer,
     int length_location;
     struct module_state *state = GETSTATE(self);
     long type_marker;
-    int is_dict = PyDict_Check(dict);
+    int is_dict = _CBSON_EXACT_OR_SUBCLASS(dict, Dict, &PyDict_Type);
     if (!state) {
         return 0;
     }
@@ -3612,14 +3721,9 @@ static int _cbson_traverse(PyObject *m, visitproc visit, void *arg) {
 #ifdef Py_LIMITED_API
     Py_VISIT(state->datetime_type);
     Py_VISIT(state->timedelta_type);
-    Py_VISIT(state->_hour_str);
-    Py_VISIT(state->_minute_str);
-    Py_VISIT(state->_second_str);
-    Py_VISIT(state->_microsecond_str);
     Py_VISIT(state->_days_str);
     Py_VISIT(state->_seconds_str);
     Py_VISIT(state->_microseconds_delta_str);
-    Py_VISIT(state->_toordinal_str);
 #endif
     return 0;
 }
@@ -3672,14 +3776,9 @@ static int _cbson_clear(PyObject *m) {
 #ifdef Py_LIMITED_API
     Py_CLEAR(state->datetime_type);
     Py_CLEAR(state->timedelta_type);
-    Py_CLEAR(state->_hour_str);
-    Py_CLEAR(state->_minute_str);
-    Py_CLEAR(state->_second_str);
-    Py_CLEAR(state->_microsecond_str);
     Py_CLEAR(state->_days_str);
     Py_CLEAR(state->_seconds_str);
     Py_CLEAR(state->_microseconds_delta_str);
-    Py_CLEAR(state->_toordinal_str);
 #endif
     return 0;
 }
@@ -3710,15 +3809,17 @@ _cbson_exec(PyObject *m)
         INITERROR;
     }
 
+    /* Fetch the frozen datetime C API (see the _PyDateTime_CAPI comment). */
+    state->datetime_capi =
+        (_PyDateTime_CAPI*)PyCapsule_Import(_PYDATETIME_CAPSULE_NAME, 0);
+    if (!state->datetime_capi) {
+        INITERROR;
+    }
+
     /* Intern attribute name strings */
-    if (!((state->_hour_str = PyUnicode_InternFromString("hour")) &&
-        (state->_minute_str = PyUnicode_InternFromString("minute")) &&
-        (state->_second_str = PyUnicode_InternFromString("second")) &&
-        (state->_microsecond_str = PyUnicode_InternFromString("microsecond")) &&
-        (state->_days_str = PyUnicode_InternFromString("days")) &&
+    if (!((state->_days_str = PyUnicode_InternFromString("days")) &&
         (state->_seconds_str = PyUnicode_InternFromString("seconds")) &&
-        (state->_microseconds_delta_str = PyUnicode_InternFromString("microseconds")) &&
-        (state->_toordinal_str = PyUnicode_InternFromString("toordinal")))) {
+        (state->_microseconds_delta_str = PyUnicode_InternFromString("microseconds")))) {
             INITERROR;
     }
 #else

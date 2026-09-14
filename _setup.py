@@ -113,9 +113,6 @@ _cmessage_sources = [
     "bson/_cbsonmodule.c",
     "bson/buffer.c",
 ]
-if not use_abi3:
-    _cbson_sources.append("bson/time64.c")
-    _cmessage_sources.append("bson/time64.c")
 
 _abi3_kwargs = (
     {
