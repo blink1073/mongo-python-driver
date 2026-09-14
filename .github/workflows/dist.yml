@@ -98,7 +98,9 @@ jobs:
           # (matrix.buildplat[3], e.g. "cp311-manylinux_x86_64"); the abi3 tag
           # comes from py_limited_api with PYMONGO_BUILD_ABI3 set below.
           CIBW_BUILD: ${{ matrix.buildplat[3] }}
-          CIBW_ARCHS: ${{ matrix.buildplat[1] == 'manylinux_aarch64' && 'aarch64' || matrix.buildplat[1] == 'manylinux_ppc64le' && 'ppc64le' || matrix.buildplat[1] == 'manylinux_s390x' && 's390x' || matrix.buildplat[1] == 'manylinux_i686' && 'i686' || '' }}
+          # macos-14 runners are Apple Silicon; build arm64 so the wheel's
+          # arch matches delocate's --require-archs.
+          CIBW_ARCHS: ${{ matrix.buildplat[1] == 'manylinux_aarch64' && 'aarch64' || matrix.buildplat[1] == 'manylinux_ppc64le' && 'ppc64le' || matrix.buildplat[1] == 'manylinux_s390x' && 's390x' || matrix.buildplat[1] == 'manylinux_i686' && 'i686' || matrix.buildplat[1] == 'macos' && 'arm64' || '' }}
           # abi3 builds set PYMONGO_BUILD_ABI3 to select the limited-API code
           # path and produce a cp311-abi3 wheel. cp310 and cp314t builds leave
           # it unset: 3.10 cannot (from a 3.10 runner) and 3.14t must not use
