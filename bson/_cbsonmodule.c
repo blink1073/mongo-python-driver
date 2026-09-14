@@ -2120,19 +2120,39 @@ int decode_and_write_pair(PyObject* self, buffer_t buffer,
 /* Write a RawBSONDocument to the buffer.
  * Returns the number of bytes written or 0 on failure.
  */
+/* Get a read-only buffer view of a bytes-like object.
+ * Returns 1 on success or 0 on failure with an exception set.
+ */
+static int _get_buffer(PyObject *exporter, Py_buffer *view);
+
 static int write_raw_doc(buffer_t buffer, PyObject* raw, PyObject* _raw_str) {
     char* bytes;
     Py_ssize_t len;
     int len_int;
     int bytes_written = 0;
     PyObject* bytes_obj = NULL;
+    Py_buffer view = {0};
 
     bytes_obj = PyObject_GetAttr(raw, _raw_str);
     if (!bytes_obj) {
         goto fail;
     }
 
-    if (-1 == PyBytes_AsStringAndSize(bytes_obj, &bytes, &len)) {
+    if (PyBytes_Check(bytes_obj)) {
+        /* The common case: raw is bytes. */
+        if (PyBytes_AsStringAndSize(bytes_obj, &bytes, &len) < 0) {
+            goto fail;
+        }
+    } else if (PyMemoryView_Check(bytes_obj)) {
+        /* raw may also be a memoryview of the decode buffer. */
+        if (!_get_buffer(bytes_obj, &view)) {
+            goto fail;
+        }
+        bytes = (char*)view.buf;
+        len = view.len;
+    } else {
+        PyErr_SetString(PyExc_TypeError,
+                        "RawBSONDocument.raw must be bytes or memoryview");
         goto fail;
     }
     len_int = _downcast_and_check(len, 0);
@@ -2144,6 +2164,7 @@ static int write_raw_doc(buffer_t buffer, PyObject* raw, PyObject* _raw_str) {
     }
     bytes_written = len_int;
 fail:
+    PyBuffer_Release(&view);
     Py_XDECREF(bytes_obj);
     return bytes_written;
 }
@@ -2416,6 +2437,13 @@ static PyObject* _cbson_dict_to_bson(PyObject* self, PyObject* args) {
         raw_bson_document_bytes_obj = PyObject_GetAttr(dict, state->_raw_str);
         if (NULL == raw_bson_document_bytes_obj) {
             return NULL;
+        }
+        /* raw may be a memoryview but
+         * encoding must always produce bytes. */
+        if (!PyBytes_Check(raw_bson_document_bytes_obj)) {
+            PyObject* as_bytes = PyBytes_FromObject(raw_bson_document_bytes_obj);
+            Py_DECREF(raw_bson_document_bytes_obj);
+            return as_bytes;
         }
         return raw_bson_document_bytes_obj;
     }
@@ -3552,6 +3580,12 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
         return result;
     }
 
+    bson = _prepare_input_buffer(self, bson, &options);
+    if (!bson) {
+        destroy_codec_options(&options);
+        return result;
+    }
+
     if (!_get_buffer(bson, &view)) {
         destroy_codec_options(&options);
         return result;
@@ -3603,6 +3637,7 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
     result = elements_to_dict(self, string, (unsigned)size, &options);
 done:
     PyBuffer_Release(&view);
+    Py_DECREF(bson);
     destroy_codec_options(&options);
     return result;
 }
@@ -3623,7 +3658,14 @@ static PyObject* _cbson_decode_all(PyObject* self, PyObject* args) {
         return NULL;
     }
 
+    bson = _prepare_input_buffer(self, bson, &options);
+    if (!bson) {
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
     if (!_get_buffer(bson, &view)) {
+        Py_DECREF(bson);
         destroy_codec_options(&options);
         return NULL;
     }
@@ -3698,6 +3740,7 @@ fail:
     result = NULL;
 done:
     PyBuffer_Release(&view);
+    Py_DECREF(bson);
     destroy_codec_options(&options);
     return result;
 }
