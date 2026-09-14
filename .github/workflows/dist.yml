@@ -226,7 +226,11 @@ jobs:
           # extension) is imported, not the checkout's pure-Python fallback.
           cd "$RUNNER_TEMP"
           python "$GITHUB_WORKSPACE/tools/fail_if_no_c.py"
-          python -m pytest --import-mode=importlib "$GITHUB_WORKSPACE/test/test_bson.py" "$GITHUB_WORKSPACE/test/test_bson_corpus.py" -q
+          # The repo pyproject pytest config needs pytest-asyncio and the
+          # live-server test markers (--strict-config, asyncio fixture scope);
+          # these two sync BSON files run fine under an empty config.
+          printf '[pytest]\n' > pytest.ini
+          python -m pytest -c "$RUNNER_TEMP/pytest.ini" --import-mode=importlib "$GITHUB_WORKSPACE/test/test_bson.py" "$GITHUB_WORKSPACE/test/test_bson_corpus.py" -q
 
   test_abi3_next_release:
     name: Test abi3 wheel on the next CPython pre-release
@@ -270,4 +274,8 @@ jobs:
           # extension) is imported, not the checkout's pure-Python fallback.
           cd "$RUNNER_TEMP"
           python "$GITHUB_WORKSPACE/tools/fail_if_no_c.py"
-          python -m pytest --import-mode=importlib "$GITHUB_WORKSPACE/test/test_bson.py" "$GITHUB_WORKSPACE/test/test_bson_corpus.py" -q
+          # The repo pyproject pytest config needs pytest-asyncio and the
+          # live-server test markers (--strict-config, asyncio fixture scope);
+          # these two sync BSON files run fine under an empty config.
+          printf '[pytest]\n' > pytest.ini
+          python -m pytest -c "$RUNNER_TEMP/pytest.ini" --import-mode=importlib "$GITHUB_WORKSPACE/test/test_bson.py" "$GITHUB_WORKSPACE/test/test_bson_corpus.py" -q
