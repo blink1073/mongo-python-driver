@@ -105,21 +105,39 @@ https://pymongo.readthedocs.io/en/stable/installation.html#osx
             )
 
 
+use_abi3 = bool(os.environ.get("PYMONGO_BUILD_ABI3")) and sys.version_info >= (3, 11)
+
+_cbson_sources = ["bson/_cbsonmodule.c", "bson/buffer.c"]
+_cmessage_sources = [
+    "pymongo/_cmessagemodule.c",
+    "bson/_cbsonmodule.c",
+    "bson/buffer.c",
+]
+
+_abi3_kwargs = (
+    {
+        "py_limited_api": "3.11",
+        # Modern setuptools infers the .abi3.so suffix from py_limited_api
+        # but does not always inject the Py_LIMITED_API define; set it
+        # explicitly so the limited-API code paths are selected at compile.
+        "define_macros": [("Py_LIMITED_API", "0x030B0000")],
+    }
+    if use_abi3
+    else {}
+)
+
 ext_modules = [
     Extension(
         "bson._cbson",
         include_dirs=["bson"],
-        sources=["bson/_cbsonmodule.c", "bson/time64.c", "bson/buffer.c"],
+        sources=_cbson_sources,
+        **_abi3_kwargs,
     ),
     Extension(
         "pymongo._cmessage",
         include_dirs=["bson"],
-        sources=[
-            "pymongo/_cmessagemodule.c",
-            "bson/_cbsonmodule.c",
-            "bson/time64.c",
-            "bson/buffer.c",
-        ],
+        sources=_cmessage_sources,
+        **_abi3_kwargs,
     ),
 ]
 

@@ -23,6 +23,15 @@
 #define PY_SSIZE_T_CLEAN
 #include "Python.h"
 
+/* The limited C API (Py_LIMITED_API >= 0x030B0000) omits the libc headers
+ * from Python.h; include the ones this module uses. */
+#ifdef Py_LIMITED_API
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <errno.h>
+#endif
+
 #include "_cbsonmodule.h"
 #include "buffer.h"
 
