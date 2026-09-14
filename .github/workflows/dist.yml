@@ -93,7 +93,12 @@ jobs:
 
       - name: Build wheels
         env:
-          CIBW_BUILD: ${{ matrix.buildplat[2] }}
+          # abi3 builds use the bare Python-ABI selector (cibuildwheel rejects a
+          # selector that appends a platform to an abi3 tag, e.g.
+          # "cp311-abi3-manylinux_i686"); the target arch is supplied via
+          # CIBW_ARCHS. cp310/cp314t keep their platform-qualified selector.
+          CIBW_BUILD: ${{ startsWith(matrix.buildplat[2], 'cp311-abi3') && 'cp311-abi3' || matrix.buildplat[2] }}
+          CIBW_ARCHS: ${{ matrix.buildplat[1] == 'manylinux_aarch64' && 'aarch64' || matrix.buildplat[1] == 'manylinux_ppc64le' && 'ppc64le' || matrix.buildplat[1] == 'manylinux_s390x' && 's390x' || matrix.buildplat[1] == 'manylinux_i686' && 'i686' || '' }}
           # abi3 builds set PYMONGO_BUILD_ABI3 to select the limited-API code
           # path and produce a cp311-abi3 wheel. cp310 and cp314t builds leave
           # it unset: 3.10 cannot (from a 3.10 runner) and 3.14t must not use
