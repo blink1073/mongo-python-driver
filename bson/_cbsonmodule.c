@@ -156,6 +156,7 @@ struct module_state {
 #endif
     int64_t min_millis;
     int64_t max_millis;
+    Py_ssize_t raw_bson_view_threshold;
 };
 
 #define GETSTATE(m) ((struct module_state*)PyModule_GetState(m))
@@ -985,6 +986,7 @@ static int _load_python_objects(PyObject* module) {
     PyObject* compiled = NULL;
     PyObject* min_datetime_ms = NULL;
     PyObject* max_datetime_ms = NULL;
+    PyObject* raw_bson_view_threshold = NULL;
     struct module_state *state = GETSTATE(module);
     if (!state) {
         return 1;
@@ -1036,15 +1038,19 @@ static int _load_python_objects(PyObject* module) {
         _load_object(&min_datetime_ms, "bson.datetime_ms", "_MIN_UTC_MS") ||
         _load_object(&max_datetime_ms, "bson.datetime_ms", "_MAX_UTC_MS") ||
         _load_object(&state->min_datetime, "bson.datetime_ms", "_MIN_UTC") ||
-        _load_object(&state->max_datetime, "bson.datetime_ms", "_MAX_UTC")) {
+        _load_object(&state->max_datetime, "bson.datetime_ms", "_MAX_UTC") ||
+        _load_object(&raw_bson_view_threshold, "bson.codec_options", "_RAW_BSON_VIEW_THRESHOLD")) {
         return 1;
     }
 
     state->min_millis = PyLong_AsLongLong(min_datetime_ms);
     state->max_millis = PyLong_AsLongLong(max_datetime_ms);
+    state->raw_bson_view_threshold = PyLong_AsSsize_t(raw_bson_view_threshold);
     Py_DECREF(min_datetime_ms);
     Py_DECREF(max_datetime_ms);
-    if ((state->min_millis == -1 || state->max_millis == -1) && PyErr_Occurred()) {
+    Py_DECREF(raw_bson_view_threshold);
+    if ((state->min_millis == -1 || state->max_millis == -1 ||
+         state->raw_bson_view_threshold == -1) && PyErr_Occurred()) {
         return 1;
     }
 
@@ -3239,6 +3245,7 @@ static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
     if (PyBytes_AsStringAndSize(bson, &string, &bson_len) < 0) {
         return NULL;
     }
+    options.buffer_owner = bson;
 
     new_position = _element_to_dict(self, string, position, max, &options, raw_array, &name, &value);
     if (new_position < 0) {
@@ -3317,7 +3324,45 @@ static PyObject* elements_to_dict(PyObject* self, const char* string,
                                   const codec_options_t* options) {
     PyObject* result;
     if (options->is_raw_bson) {
-        PyObject* bson_bytes = PyBytes_FromStringAndSize(string, max);
+        PyObject* bson_bytes;
+        PyObject* buffer_owner = options->buffer_owner;
+        const char* owner_data = NULL;
+        Py_ssize_t owner_size = 0;
+        int owner_is_bytes = 0;
+        if (buffer_owner && PyBytes_Check(buffer_owner)) {
+            if (PyBytes_AsStringAndSize(buffer_owner, (char**)&owner_data, &owner_size) < 0) {
+                return NULL;
+            }
+            owner_is_bytes = 1;
+        }
+        Py_ssize_t offset = 0;
+        if (owner_is_bytes) {
+            offset = string - owner_data;
+            if (offset < 0 || offset + (Py_ssize_t)max > owner_size) {
+                PyObject* InvalidBSON = _error("InvalidBSON");
+                if (InvalidBSON) {
+                    PyErr_SetString(InvalidBSON, "invalid buffer offset");
+                    Py_DECREF(InvalidBSON);
+                }
+                return NULL;
+            }
+        }
+        if (owner_is_bytes && offset == 0 && (Py_ssize_t)max == owner_size) {
+            /* The document spans the entire buffer, pass the buffer itself through. */
+            bson_bytes = buffer_owner;
+            Py_INCREF(bson_bytes);
+        } else if (owner_is_bytes &&
+                   (Py_ssize_t)max >= GETSTATE(self)->raw_bson_view_threshold) {
+            /* Zero-copy: pass a read-only slice of the buffer instead of a bytes copy. */
+            PyObject* top_view = PyMemoryView_FromObject(buffer_owner);
+            if (!top_view) {
+                return NULL;
+            }
+            bson_bytes = PySequence_GetSlice(top_view, offset, offset + (Py_ssize_t)max);
+            Py_DECREF(top_view);
+        } else {
+            bson_bytes = PyBytes_FromStringAndSize(string, max);
+        }
         if (!bson_bytes) {
             return NULL;
         }
@@ -3357,6 +3402,141 @@ fail:
     return 0;
 }
 
+static int _contains_view_eligible_doc(const char* data, Py_ssize_t len,
+                                       Py_ssize_t threshold) {
+    Py_ssize_t position = 0;
+    while (len - position >= 4) {
+        int32_t size;
+        memcpy(&size, data + position, 4);
+        size = (int32_t)BSON_UINT32_FROM_LE(size);
+        if (size < BSON_MIN_SIZE || (Py_ssize_t)size > len - position) {
+            return 0;
+        }
+        if ((Py_ssize_t)size >= threshold) {
+            return 1;
+        }
+        position += size;
+    }
+    return 0;
+}
+
+/* Prepare an input buffer for raw-document decoding: bytes and
+ * bytearray are returned as-is, with other inputs copied to
+ * bytes only if the stream contains a document large enough for a zero-copy
+ * view. Returns a new reference or NULL on failure with an exception set. */
+static PyObject* _prepare_input_buffer(PyObject* self, PyObject* bson,
+                                       const codec_options_t* options) {
+    Py_buffer tmp = {0};
+    int needs_copy;
+    if (!options->is_raw_bson || PyBytes_Check(bson) || PyByteArray_Check(bson)) {
+        Py_INCREF(bson);
+        return bson;
+    }
+    if (!_get_buffer(bson, &tmp)) {
+        return NULL;
+    }
+    needs_copy = _contains_view_eligible_doc(
+        (const char*)tmp.buf, tmp.len, GETSTATE(self)->raw_bson_view_threshold);
+    PyBuffer_Release(&tmp);
+    if (!needs_copy) {
+        Py_INCREF(bson);
+        return bson;
+    }
+    return PyBytes_FromObject(bson);
+}
+
+/* Decode all elements of a raw BSON document into `result`. */
+static PyObject* _cbson_raw_to_dict(PyObject* self, PyObject* args) {
+    PyObject* data;
+    unsigned position;
+    unsigned obj_end;
+    PyObject* options_obj;
+    PyObject* result;
+    int raw_array = 0;
+    codec_options_t options;
+    PyObject* bson = NULL;
+    Py_buffer view = {0};
+    PyObject* ret = NULL;
+    const char* string;
+    unsigned end;
+
+    if (!(PyArg_ParseTuple(args, "OIIOOp", &data, &position, &obj_end,
+                           &options_obj, &result, &raw_array) &&
+            convert_codec_options(self, options_obj, &options))) {
+        return NULL;
+    }
+
+    bson = _prepare_input_buffer(self, data, &options);
+    if (!bson) {
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    if (!_get_buffer(bson, &view)) {
+        Py_DECREF(bson);
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    string = (char*)view.buf;
+    /* obj_end must be the index of the document's eoo byte. The eoo check
+     * also protects against field scans running past the end of the buffer. */
+    if (obj_end < 1 || (Py_ssize_t)obj_end >= view.len || position > obj_end ||
+            string[obj_end]) {
+        PyObject* InvalidBSON = _error("InvalidBSON");
+        if (InvalidBSON) {
+            PyErr_SetString(InvalidBSON, "bad object or element length");
+            Py_DECREF(InvalidBSON);
+        }
+        goto done;
+    }
+
+    options.buffer_owner = bson;
+
+    end = obj_end - 1;
+    while (position < end) {
+        PyObject* name = NULL;
+        PyObject* value = NULL;
+        int new_position = _element_to_dict(
+            self, string, position, obj_end, &options, raw_array, &name, &value);
+        if (new_position < 0) {
+            goto done;
+        }
+        position = (unsigned)new_position;
+
+        if (PyDict_CheckExact(result)) {
+            if (PyDict_SetItem(result, name, value) < 0) {
+                Py_DECREF(name);
+                Py_DECREF(value);
+                goto done;
+            }
+        } else {
+            if (PyObject_SetItem(result, name, value) < 0) {
+                Py_DECREF(name);
+                Py_DECREF(value);
+                goto done;
+            }
+        }
+        Py_DECREF(name);
+        Py_DECREF(value);
+    }
+    if (position != obj_end) {
+        PyObject* InvalidBSON = _error("InvalidBSON");
+        if (InvalidBSON) {
+            PyErr_SetString(InvalidBSON, "bad object or element length");
+            Py_DECREF(InvalidBSON);
+        }
+        goto done;
+    }
+    Py_INCREF(result);
+    ret = result;
+done:
+    PyBuffer_Release(&view);
+    Py_DECREF(bson);
+    destroy_codec_options(&options);
+    return ret;
+}
+
 static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
     int32_t size;
     Py_ssize_t total_size;
@@ -3390,6 +3570,7 @@ static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
     }
 
     string = (char*)view.buf;
+    options.buffer_owner = bson;
     memcpy(&size, string, 4);
     size = (int32_t)BSON_UINT32_FROM_LE(size);
     if (size < BSON_MIN_SIZE) {
@@ -3448,6 +3629,7 @@ static PyObject* _cbson_decode_all(PyObject* self, PyObject* args) {
     }
     total_size = view.len;
     string = (char*)view.buf;
+    options.buffer_owner = bson;
 
     if (!(result = PyList_New(0))) {
         goto fail;
@@ -3662,6 +3844,8 @@ done:
 static PyMethodDef _CBSONMethods[] = {
     {"_dict_to_bson", _cbson_dict_to_bson, METH_VARARGS,
      "convert a dictionary to a string containing its BSON representation."},
+    {"_raw_to_dict", _cbson_raw_to_dict, METH_VARARGS,
+     "Decode all elements of a raw BSON document",},
     {"_bson_to_dict", _cbson_bson_to_dict, METH_VARARGS,
      "convert a BSON string to a SON object."},
     {"_decode_all", _cbson_decode_all, METH_VARARGS,
