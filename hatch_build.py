@@ -25,6 +25,17 @@ class CustomHook(BuildHookInterface):
         # Ensure wheel is marked as binary and contains the binary files.
         build_data["infer_tag"] = True
         build_data["pure_python"] = False
+        if os.environ.get("PYMONGO_BUILD_ABI3"):
+            from packaging.tags import sys_tags
+
+            # abi3 wheels support Python 3.11+ (with the GIL). Build the
+            # cp311-abi3-<platform> tag from the current platform.
+            tag = next(
+                t
+                for t in sys_tags()
+                if "manylinux" not in t.platform and "musllinux" not in t.platform
+            )
+            build_data["tag"] = f"cp311-abi3-{tag.platform}"
         if os.name == "nt":
             patt = ".pyd"
         else:

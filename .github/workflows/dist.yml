@@ -34,15 +34,32 @@ jobs:
         # Github Actions doesn't support pairing matrix values together, let's improvise
         # https://github.com/github/feedback/discussions/7835#discussioncomment-1769026
         buildplat:
-        - [ubuntu-latest, "manylinux_x86_64", "cp3*-manylinux_x86_64"]
-        - [ubuntu-latest, "manylinux_aarch64", "cp3*-manylinux_aarch64"]
-        - [ubuntu-latest, "manylinux_ppc64le", "cp3*-manylinux_ppc64le"]
-        - [ubuntu-latest, "manylinux_s390x", "cp3*-manylinux_s390x"]
-        - [ubuntu-latest, "manylinux_i686", "cp3*-manylinux_i686"]
-        - [windows-2022, "win_amd6", "cp3*-win_amd64"]
-        - [windows-2022, "win32", "cp3*-win32"]
-        - [windows-11-arm, "win_arm64", "cp3*-win_arm64"]
-        - [macos-14, "macos", "cp*-macosx_*"]
+        # [runner, platform, identifier, cibuildwheel-build-selector]
+        # abi3 builds - single build per platform, covers GIL-enabled Python 3.11+
+        - [ubuntu-latest, "manylinux_x86_64", "cp311-abi3-manylinux_x86_64", "cp311-manylinux_x86_64"]
+        - [ubuntu-latest, "manylinux_aarch64", "cp311-abi3-manylinux_aarch64", "cp311-manylinux_aarch64"]
+        - [ubuntu-latest, "manylinux_ppc64le", "cp311-manylinux_ppc64le", "cp311-manylinux_ppc64le"]
+        - [ubuntu-latest, "manylinux_s390x", "cp311-manylinux_s390x", "cp311-manylinux_s390x"]
+        - [ubuntu-latest, "manylinux_i686", "cp311-manylinux_i686", "cp311-manylinux_i686"]
+        - [windows-2022, "win_amd64", "cp311-abi3-win_amd64", "cp311-win_amd64"]
+        - [windows-2022, "win32", "cp311-abi3-win32", "cp311-win32"]
+        - [windows-11-arm, "win_arm64", "cp311-abi3-win_arm64", "cp311-win_arm64"]
+        - [macos-14, "macos", "cp311-abi3-macosx", "cp311-macosx_*"]
+        # Per-version builds for 3.10
+        - [ubuntu-latest, "manylinux_x86_64", "cp310-manylinux_x86_64", "cp310-manylinux_x86_64"]
+        - [ubuntu-latest, "manylinux_aarch64", "cp310-manylinux_aarch64", "cp310-manylinux_aarch64"]
+        - [ubuntu-latest, "manylinux_ppc64le", "cp310-manylinux_ppc64le", "cp310-manylinux_ppc64le"]
+        - [ubuntu-latest, "manylinux_s390x", "cp310-manylinux_s390x", "cp310-manylinux_s390x"]
+        - [ubuntu-latest, "manylinux_i686", "cp310-manylinux_i686", "cp310-manylinux_i686"]
+        - [windows-2022, "win_amd64", "cp310-win_amd64", "cp310-win_amd64"]
+        - [windows-2022, "win32", "cp310-win32", "cp310-win32"]
+        - [windows-11-arm, "win_arm64", "cp310-win_arm64", "cp310-win_arm64"]
+        - [macos-14, "macos", "cp310-macosx", "cp310-macosx_*"]
+        # Free-threaded 3.14t (per-version, no stable ABI)
+        - [ubuntu-latest, "manylinux_x86_64", "cp314t-manylinux_x86_64", "cp314t-manylinux_x86_64"]
+        - [ubuntu-latest, "manylinux_aarch64", "cp314t-manylinux_aarch64", "cp314t-manylinux_aarch64"]
+        - [windows-2022, "win_amd64", "cp314t-win_amd64", "cp314t-win_amd64"]
+        - [macos-14, "macos", "cp314t-macosx"]
 
     steps:
       - name: Checkout pymongo
@@ -77,7 +94,18 @@ jobs:
 
       - name: Build wheels
         env:
-          CIBW_BUILD: ${{ matrix.buildplat[2] }}
+          # Abi3 rows build under the plain per-version interpreter selector
+          # (matrix.buildplat[3], e.g. "cp311-manylinux_x86_64"); the abi3 tag
+          # comes from py_limited_api with PYMONGO_BUILD_ABI3 set below.
+          CIBW_BUILD: ${{ matrix.buildplat[3] }}
+          # macos-14 runners are Apple Silicon; build arm64 so the wheel's
+          # arch matches delocate's --require-archs.
+          CIBW_ARCHS: ${{ matrix.buildplat[1] == 'manylinux_aarch64' && 'aarch64' || matrix.buildplat[1] == 'manylinux_ppc64le' && 'ppc64le' || matrix.buildplat[1] == 'manylinux_s390x' && 's390x' || matrix.buildplat[1] == 'manylinux_i686' && 'i686' || matrix.buildplat[1] == 'macos' && 'arm64' || '' }}
+          # abi3 builds set PYMONGO_BUILD_ABI3 to select the limited-API code
+          # path and produce a cp311-abi3 wheel. cp310 and cp314t builds leave
+          # it unset: 3.10 cannot (from a 3.10 runner) and 3.14t must not use
+          # abi3 (no stable ABI for free-threaded Python).
+          CIBW_ENVIRONMENT: ${{ startsWith(matrix.buildplat[2], 'cp311-abi3') && 'PYMONGO_BUILD_ABI3=1' || '' }}
           # Strip any in-place C extensions from previous builds
           # so they don't leak into the next wheel.
           CIBW_BEFORE_BUILD: python ./tools/clean.py
@@ -86,18 +114,25 @@ jobs:
       - name: Assert all versions in wheelhouse
         if: ${{ ! startsWith(matrix.buildplat[1], 'macos') }}
         run: |
-          ls wheelhouse/*cp39*.whl
-          ls wheelhouse/*cp310*.whl
-          ls wheelhouse/*cp311*.whl
-          ls wheelhouse/*cp312*.whl
-          ls wheelhouse/*cp313*.whl
-          ls wheelhouse/*cp314*.whl
-          # Free-threading builds:
-          ls wheelhouse/*cp314t*.whl
+          # abi3 wheels (one per platform, covers GIL-enabled 3.11-3.14+)
+          if [[ "${{ matrix.buildplat[2] }}" == "cp311-abi3-"* ]]; then
+            ls wheelhouse/*abi3*.whl
+          # Per-version cp311 wheels (archs without abi3 support)
+          elif [[ "${{ matrix.buildplat[2] }}" == "cp311-"* ]]; then
+            ls wheelhouse/*cp311*.whl
+          # Per-version cp310 wheels
+          elif [[ "${{ matrix.buildplat[2] }}" == "cp310-"* ]]; then
+            ls wheelhouse/*cp310*.whl
+          # Free-threaded cp314t wheels
+          elif [[ "${{ matrix.buildplat[2] }}" == "cp314t-"* ]]; then
+            ls wheelhouse/*cp314t*.whl
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: wheel-${{ matrix.buildplat[1] }}
+          # Unique per matrix row - multiple rows share a platform (manylinux_x86_64
+          # builds cp311-abi3, cp310, cp314t), and same-name uploads overwrite.
+          name: wheel-${{ matrix.buildplat[2] }}
           path: ./wheelhouse/*.whl
           if-no-files-found: error
 
@@ -114,7 +149,7 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           # Build sdist on lowest supported Python
-          python-version: "3.9"
+          python-version: "3.10"
 
       - name: Build SDist
         run: |
@@ -149,3 +184,98 @@ jobs:
         with:
           name: all-dist-${{ github.run_id }}
           path: "./*"
+
+  test_abi3_compat:
+    name: Test abi3 wheel on CPython ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    needs: build_wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        # The cp311-abi3 wheel claims support for every GIL-enabled Python
+        # >= 3.11. Its decode path relies on CPython's frozen PyDateTime_CAPI
+        # (re-declared in bson/_cbsonmodule.c), so we must run the BSON suite
+        # against every version we ship it for, not just the build Python.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout pymongo
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Download abi3 wheel
+        uses: actions/download-artifact@v8
+        with:
+          # Pin to this run - the wheel is rebuilt for every commit, so a
+          # digest check against a prior run's artifact fails spurious.
+          run-id: ${{ github.run_id }}
+          name: wheel-cp311-abi3-manylinux_x86_64
+          path: wheelhouse
+          digest-mismatch: warn
+
+      - name: Install abi3 wheel and run BSON suite
+        run: |
+          python -m pip install pytest wheelhouse/*cp311-abi3*.whl
+          # Leave the source tree so the freshly-installed wheel (with the C
+          # extension) is imported, not the checkout's pure-Python fallback.
+          cd "$RUNNER_TEMP"
+          python "$GITHUB_WORKSPACE/tools/fail_if_no_c.py"
+          # The repo pyproject pytest config needs pytest-asyncio and the
+          # live-server test markers (--strict-config, asyncio fixture scope);
+          # these two sync BSON files run fine under an empty config.
+          printf '[pytest]\n' > pytest.ini
+          python -m pytest -c "$RUNNER_TEMP/pytest.ini" --import-mode=importlib "$GITHUB_WORKSPACE/test/test_bson.py" "$GITHUB_WORKSPACE/test/test_bson_corpus.py" -q
+
+  test_abi3_next_release:
+    name: Test abi3 wheel on the next CPython pre-release
+    runs-on: ubuntu-latest
+    needs: build_wheels
+    # Best-effort backstop for the non-stable-ABI PyDateTime_CAPI usage: if
+    # the next CPython (e.g. 3.15 dev/beta) resolves or changes that layout,
+    # we want to catch it during its beta phase. allow-prereleases + a "-dev"
+    # specifier tracks the in-development version; the job is non-blocking so
+    # a version that has not yet been published on the setup-python mirror
+    # does not fail the release.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.15-dev"]
+    steps:
+      - name: Checkout pymongo
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Download abi3 wheel
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ github.run_id }}
+          name: wheel-cp311-abi3-manylinux_x86_64
+          path: wheelhouse
+          digest-mismatch: warn
+
+      - name: Install abi3 wheel and run BSON suite
+        run: |
+          python -m pip install pytest wheelhouse/*cp311-abi3*.whl
+          # Leave the source tree so the freshly-installed wheel (with the C
+          # extension) is imported, not the checkout's pure-Python fallback.
+          cd "$RUNNER_TEMP"
+          python "$GITHUB_WORKSPACE/tools/fail_if_no_c.py"
+          # The repo pyproject pytest config needs pytest-asyncio and the
+          # live-server test markers (--strict-config, asyncio fixture scope);
+          # these two sync BSON files run fine under an empty config.
+          printf '[pytest]\n' > pytest.ini
+          python -m pytest -c "$RUNNER_TEMP/pytest.ini" --import-mode=importlib "$GITHUB_WORKSPACE/test/test_bson.py" "$GITHUB_WORKSPACE/test/test_bson_corpus.py" -q
