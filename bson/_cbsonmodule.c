@@ -1260,7 +1260,7 @@ int convert_codec_options(PyObject* self, PyObject* options_obj, codec_options_t
     }
 
     options->is_raw_bson = (101 == type_marker);
-    options->is_dict_class = Py_IS_TYPE(options->document_class, &PyDict_Type);
+    options->is_dict_class = (options->document_class == (PyObject*)&PyDict_Type);
     options->buffer_owner = NULL;
     options->options_obj = options_obj;
 
