@@ -270,6 +270,10 @@ typedef struct {
 #define _DT_MINUTE(o)       ((_PyDateTime_Fields*)(o))->data[5]
 #define _DT_SECOND(o)       ((_PyDateTime_Fields*)(o))->data[6]
 #define _DT_MICROSECOND(o)  (((((_PyDateTime_Fields*)(o))->data[7] << 16) | (((_PyDateTime_Fields*)(o))->data[8] << 8)) | ((_PyDateTime_Fields*)(o))->data[9])
+/* Nonzero iff the datetime carries a tzinfo (is tz-aware). Mirrors the
+ * hastzinfo member of _PyDateTime_BaseDateTime, which the struct above
+ * reproduces at the same offset for both the naive and aware layouts. */
+#define _DT_HASTZINFO(o)    (((_PyDateTime_Fields*)(o))->hastzinfo)
 #endif
 
 /* Check for an exact type first, then fall back to the subclass check.
@@ -1989,6 +1993,26 @@ handle_bytes:
 handle_datetime:
     {
         long long millis;
+#ifdef Py_LIMITED_API
+        /* A naive, exact datetime's utcoffset() is always None (its tzinfo is
+         * None), so the method call is redundant on the common naive hot path.
+         * Restrict the shortcut to exact datetime instances: a subclass may
+         * override utcoffset() and return a non-None offset even for a naive
+         * instance, which we must keep honoring. */
+        if (_DT_HASTZINFO(value) == 0 &&
+            Py_IS_TYPE(value, (PyTypeObject*)state->datetime_type)) {
+            millis = millis_from_datetime(state, value);
+#else
+        if (PyDateTime_DATE_GET_TZINFO(value) == Py_None &&
+            Py_IS_TYPE(value, (PyTypeObject*)PyDateTimeAPI->DateTimeType)) {
+            millis = millis_from_datetime(value);
+#endif
+            if (millis == -1 && PyErr_Occurred()) {
+                return 0;
+            }
+            *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x09;
+            return buffer_write_int64(buffer, (int64_t)millis);
+        }
         PyObject* utcoffset_args[1] = {value};
         PyObject* utcoffset = PYMONGO_VECTORCALL_METHOD(
             state->_utcoffset_str, utcoffset_args, 1, NULL);
