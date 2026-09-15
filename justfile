@@ -129,6 +129,9 @@ coverage-xml:
 run-server *args="":
     bash .evergreen/scripts/run-server.sh {{args}}
 
+run-sanitizer-tests *args="":
+    bash .evergreen/scripts/run-sanitizer-tests.sh {{args}}
+
 [group('server')]
 stop-server:
     bash .evergreen/scripts/stop-server.sh
