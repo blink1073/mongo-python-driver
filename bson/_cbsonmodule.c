@@ -1995,17 +1995,34 @@ handle_datetime:
         if (utcoffset == NULL)
             return 0;
         if (utcoffset != Py_None) {
-            PyObject* result = PyNumber_Subtract(value, utcoffset);
-            if (!result) {
-                Py_DECREF(utcoffset);
-                return 0;
-            }
-#ifdef Py_LIMITED_API
-            millis = millis_from_datetime(state, result);
-#else
-            millis = millis_from_datetime(result);
+#ifndef Py_LIMITED_API
+            /* Read the offset timedelta's fields directly instead of building a
+             * second aware datetime with PyNumber_Subtract. The offset is whole
+             * milliseconds for every real timezone, so subtracting in millis is
+             * byte-identical to value - utcoffset(); guard on a non-sub-ms
+             * offset to keep the uncommon sub-millisecond case exact. */
+            if (PyDelta_Check(utcoffset) &&
+                PyDateTime_DELTA_GET_MICROSECONDS(utcoffset) % 1000 == 0) {
+                long long offset_ms =
+                    PyDateTime_DELTA_GET_DAYS(utcoffset) * 86400000LL +
+                    PyDateTime_DELTA_GET_SECONDS(utcoffset) * 1000LL +
+                    PyDateTime_DELTA_GET_MICROSECONDS(utcoffset) / 1000LL;
+                millis = millis_from_datetime(value) - offset_ms;
+            } else
 #endif
-            Py_DECREF(result);
+            {
+                PyObject* result = PyNumber_Subtract(value, utcoffset);
+                if (!result) {
+                    Py_DECREF(utcoffset);
+                    return 0;
+                }
+#ifdef Py_LIMITED_API
+                millis = millis_from_datetime(state, result);
+#else
+                millis = millis_from_datetime(result);
+#endif
+                Py_DECREF(result);
+            }
         } else {
 #ifdef Py_LIMITED_API
             millis = millis_from_datetime(state, value);
