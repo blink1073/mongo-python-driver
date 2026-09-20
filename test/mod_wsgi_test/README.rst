@@ -13,44 +13,37 @@ mod_wsgi creates.
 Test Matrix
 -----------
 
-PyMongo should be tested with several versions of mod_wsgi and a selection
-of Python versions. Each combination of mod_wsgi and Python version should
-be tested with a standalone and a replica set. ``mod_wsgi_test.py``
-detects if the deployment is a replica set and connects to the whole set.
+Continuous integration tests the oldest supported CPython against the oldest
+supported MongoDB with minimum dependencies, and the newest supported CPython
+against the latest MongoDB, in both daemon and embedded mode against a replica
+set. The Python and MongoDB versions come from ``generate_config_utils.py`` in
+``.evergreen/scripts``. Other combinations can be tested manually.
 
 Setup
 -----
 
-Compile Python
+Install Apache
 ..............
 
-We need a Python interpreter built as a shared library. Download the
-source tarball for each Python version tested, untar it, and run::
+On Ubuntu, install Apache and the headers used to build mod_wsgi::
 
-    ./configure --prefix=/some/directory --enable-shared LDFLAGS="-Wl,--rpath=/some/directory/lib"
-    make
-    make install
+    sudo apt-get install -y apache2 apache2-dev
 
-This results in an executable named "python" or "python3" and a shared
-library named something like "libpython2.7.so.1.0" or "libpython3.3m.so.1.0".
+On Fedora/RHEL, install httpd and its headers instead::
 
-Compile mod_wsgi
+    sudo dnf install -y httpd httpd-devel
+
+The test harness detects ``apache2`` or ``httpd`` automatically and starts it
+with the matching config file (``apache24ubuntu.conf`` or
+``httpd24fedora.conf``).
+
+Install mod_wsgi
 ................
 
-Compile mod_wsgi for each combination for Python and mod_wsgi version in the
-test matrix. For example, to compile mod_wsgi 3.4 for Python 2.7 on a
-RedHat-like Linux::
+The project defines a ``mod_wsgi`` dependency group used for testing. pip
+builds mod_wsgi against the interpreter it is installed with::
 
-    sudo yum install -y httpd httpd-devel
-    wget https://modwsgi.googlecode.com/files/mod_wsgi-3.4.tar.gz
-    tar xzf mod_wsgi-3.4.tar.gz
-    cd mod_wsgi-3.4
-    ./configure --with-python=/some/directory/bin/python LDFLAGS="-Wl,--rpath=/some/directory/lib"
-    make
-    make install
-
-To ease testing of several matrix combinations, copy the resulting
-``mod_wsgi.so`` to a safe place.
+    uv sync --group mod_wsgi
 
 Start mongod
 ............
@@ -64,7 +57,7 @@ Configure Apache
 Set a MOD_WSGI_SO environment variable so our ``mod_wsgi_test.conf``
 can find and load mod_wsgi.so::
 
-    export MOD_WSGI_SO=/path/to/mod_wsgi.so
+    export MOD_WSGI_SO=$(find .venv -name "mod_wsgi*.so")
 
 Start Apache with one of the config files in this directory.
 
@@ -104,7 +97,12 @@ the workaround added in `PYTHON-569 <https://jira.mongodb.org/browse/PYTHON-569>
 Automation
 ----------
 
-At MongoDB, Inc. we use a continuous integration job that tests each
-combination in the matrix. The job starts up Apache, starts a single server
-or replica set, and runs ``test_client.py`` with the proper arguments.
-See `run-mod-wsgi-tests.sh <https://github.com/mongodb/mongo-python-driver/blob/master/.evergreen/scripts/run-mod-wsgi-tests.sh>`_
+Continuous integration runs the test on every pull request. The minimum
+dependency job runs in a Fedora container against ``httpd`` and the latest
+dependency job runs on Ubuntu against ``apache2`` (see the Mod WSGI jobs in
+`.github/workflows/test-python.yml
+<https://github.com/mongodb/mongo-python-driver/blob/master/.github/workflows/test-python.yml>`_).
+To run the same steps locally, use ``just smoke-mod-wsgi``. On Linux it runs
+against the host's Apache, either ``apache2`` or ``httpd``; on other hosts it
+runs an ubuntu container with Apache, a single-node replica set, and both test
+modes.
