@@ -273,7 +273,9 @@ def _password_digest(username: str, password: str) -> str:
 
     md5hash = hashlib.md5()  # noqa: S324
     data = f"{username}:mongo:{password}"
-    md5hash.update(data.encode("utf-8"))
+    # MD5 is mandated by the SCRAM-SHA-1 protocol and is not used to store
+    # passwords.
+    md5hash.update(data.encode("utf-8"))  # lgtm[py/weak-sensitive-data-hashing]
     return md5hash.hexdigest()
 
 

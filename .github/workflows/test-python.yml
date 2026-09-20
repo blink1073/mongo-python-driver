@@ -141,6 +141,136 @@ jobs:
           just setup-tests doctest
           just run-tests
 
+  mod_wsgi_min_deps:
+    # Exercise the minimum dependency versions against Fedora's httpd, so the
+    # mod_wsgi tests cover httpd in addition to Ubuntu's apache2.
+    runs-on: ubuntu-latest
+    name: Mod WSGI Min Deps
+    container:
+      image: fedora:latest
+    env:
+      # Install the interpreter where the Apache user can read it.
+      UV_PYTHON_INSTALL_DIR: /opt/uv-python
+    steps:
+      # actions/checkout needs git, which fedora:latest does not include.
+      - name: Install git
+        run: dnf install -y git
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install system dependencies
+        run: dnf install -y gcc gcc-c++ make httpd httpd-devel curl jq tar gzip which
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install just
+        run: |
+          uv tool install rust-just
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - id: versions
+        # The versions come from the Evergreen config's version lists.
+        run: |
+          JSON=$(uv run --no-project --with 'shrub.py>=3.10.0' python .evergreen/scripts/mod_wsgi_matrix.py)
+          echo "python=$(jq -r '.[0]."python-version"' <<<"$JSON")" >> "$GITHUB_OUTPUT"
+          echo "mongodb=$(jq -r '.[0]."mongodb-version"' <<<"$JSON")" >> "$GITHUB_OUTPUT"
+      - name: Install Python
+        run: |
+          uv python install "${{ steps.versions.outputs.python }}"
+          echo "UV_PYTHON=${{ steps.versions.outputs.python }}" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          # CI skips the venv setup in setup-dev-env.sh, so create it here.
+          export PYMONGO_C_EXT_MUST_BUILD=1
+          just install
+          uv sync --group mod_wsgi --refresh-package pymongo
+          uv run --no-sync python tools/fail_if_no_c.py
+      - name: Start MongoDB
+        # Fedora is not a supported MongoDB platform, so install the RHEL build
+        # directly instead of using the drivers-evergreen-tools action, which
+        # relies on actions/setup-python and does not run on Fedora.
+        run: |
+          ARCH=$(uname -m)
+          URL=$(curl -fsSL https://downloads.mongodb.org/current.json | jq -r --arg v "${{ steps.versions.outputs.mongodb }}." --arg a "$ARCH" '
+            .versions[] | select(.current and .production_release) | select(.version | startswith($v)) |
+            .downloads[] | select(.target=="rhel90" and .arch==$a) | .archive.url' | grep -v enterprise | head -1)
+          curl -fsSL "$URL" -o /tmp/mongo.tgz
+          tar -xz -C /tmp --strip-components=1 -f /tmp/mongo.tgz
+          mkdir -p /tmp/db
+          /tmp/bin/mongod --replSet rs0 --bind_ip 127.0.0.1 --port 27017 --dbpath /tmp/db --fork --logpath /tmp/mongod.log
+          uv run python -c "
+          from pymongo import MongoClient
+          client = MongoClient('127.0.0.1:27017', directConnection=True)
+          client.admin.command('replSetInitiate', {'_id': 'rs0', 'members': [{'_id': 0, 'host': '127.0.0.1:27017'}]})
+          MongoClient().admin.command('hello')
+          "
+      - name: Run standalone tests
+        env:
+          TEST_MIN_DEPS: "1"
+        # Call the test scripts directly: the just recipes run "uv sync",
+        # which would drop the mod_wsgi group before teardown can stop Apache.
+        run: |
+          bash .evergreen/scripts/setup-tests.sh mod_wsgi standalone
+          bash .evergreen/run-tests.sh
+      - name: Teardown
+        if: always()
+        run: bash .evergreen/scripts/teardown-tests.sh
+      - name: Run embedded tests
+        env:
+          TEST_MIN_DEPS: "1"
+        run: |
+          bash .evergreen/scripts/setup-tests.sh mod_wsgi embedded
+          bash .evergreen/run-tests.sh
+      - name: Teardown embedded
+        if: always()
+        run: bash .evergreen/scripts/teardown-tests.sh
+
+  mod_wsgi_latest:
+    runs-on: ubuntu-22.04
+    name: Mod WSGI Latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - id: versions
+        # The versions come from the Evergreen config's version lists.
+        run: |
+          JSON=$(uv run --no-project --with 'shrub.py>=3.10.0' python .evergreen/scripts/mod_wsgi_matrix.py)
+          echo "python=$(jq -r '.[1]."python-version"' <<<"$JSON")" >> "$GITHUB_OUTPUT"
+          echo "mongodb=$(jq -r '.[1]."mongodb-version"' <<<"$JSON")" >> "$GITHUB_OUTPUT"
+      - name: Install Python tooling
+        uses: mongodb-labs/drivers-github-tools/python/setup@1a2d86bd5fed4b0090453bcd510e4c2ba3b92356  # v3.0.4
+        with:
+          python-version: ${{ steps.versions.outputs.python }}
+      - name: Install Apache
+        run: sudo apt-get install -y apache2 apache2-dev
+      - name: Install dependencies
+        run: |
+          # CI skips the venv setup in setup-dev-env.sh, so create it here.
+          export PYMONGO_C_EXT_MUST_BUILD=1
+          just install
+          uv sync --group mod_wsgi --refresh-package pymongo
+          uv run --no-sync python tools/fail_if_no_c.py
+      - id: setup-mongodb
+        uses: mongodb-labs/drivers-evergreen-tools@master
+        with:
+          version: ${{ steps.versions.outputs.mongodb }}
+          topology: "replica_set"
+      - name: Run standalone tests
+        # Call the test scripts directly: the just recipes run "uv sync",
+        # which would drop the mod_wsgi group before teardown can stop Apache.
+        run: |
+          bash .evergreen/scripts/setup-tests.sh mod_wsgi standalone
+          bash .evergreen/run-tests.sh
+      - name: Teardown
+        if: always()
+        run: bash .evergreen/scripts/teardown-tests.sh
+      - name: Run embedded tests
+        run: |
+          bash .evergreen/scripts/setup-tests.sh mod_wsgi embedded
+          bash .evergreen/run-tests.sh
+      - name: Teardown embedded
+        if: always()
+        run: bash .evergreen/scripts/teardown-tests.sh
+
   docs:
     name: Docs Checks
     runs-on: ubuntu-latest

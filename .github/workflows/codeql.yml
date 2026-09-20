@@ -48,3 +48,9 @@ jobs:
             - 'doc/**'
             - 'tools/**'
             - 'test/**'
+          query-filters:
+            # The zizmor unpinned-uses rule enforces our per-action pinning
+            # policy (see .github/zizmor.yml). The actions/unpinned-tag query
+            # does not support that policy, so leave ref pinning to zizmor.
+            - exclude:
+                id: actions/unpinned-tag
