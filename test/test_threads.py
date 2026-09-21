@@ -16,7 +16,20 @@
 
 from __future__ import annotations
 
+import sys
+import textwrap
 import threading
+import uuid
+
+try:
+    from concurrent import interpreters
+except ImportError:  # pragma: no cover - Python < 3.14
+    interpreters = None  # type: ignore[assignment]
+
+try:
+    from concurrent.futures import InterpreterPoolExecutor
+except ImportError:  # pragma: no cover - Python < 3.14
+    InterpreterPoolExecutor = None  # type: ignore[assignment,misc]
 
 from test import IntegrationTest, client_context, unittest
 from test.utils import joinall
@@ -159,6 +172,208 @@ class TestThreads(IntegrationTest):
 
         error.join()
         okay.join()
+
+    @staticmethod
+    def _get_n(queue, n, errors):
+        try:
+            return sorted(queue.get(timeout=30) for _ in range(n))
+        except interpreters.QueueEmpty:
+            raise AssertionError(f"subinterpreters failed to run: {errors!r}") from None
+
+    @unittest.skipUnless(
+        sys.version_info >= (3, 14), "concurrent.interpreters requires Python 3.14+"
+    )
+    def test_subinterpreters(self):
+        if interpreters is None:
+            self.skipTest("concurrent.interpreters is not available")
+
+        # Run live MongoClients in more than one subinterpreter at the same
+        # time. This mirrors the mod_wsgi test, which mounts the same app in
+        # two interpreters, and covers pymongo shutting down its background
+        # threads when an interpreter is destroyed (PYTHON-6114).
+        n_interpreters = 2
+        coll_name = f"subinterp-{uuid.uuid4().hex}"
+        self.addCleanup(self.db.drop_collection, coll_name)
+
+        ready = interpreters.create_queue()
+        release = interpreters.create_queue()
+        done = interpreters.create_queue()
+        code = textwrap.dedent(
+            """
+            import sys
+            sys.path[:0] = path
+
+            from pymongo import MongoClient
+
+            client = MongoClient(uri, serverSelectionTimeoutMS=30000)
+            collection = client.get_database(db_name).get_collection(coll_name)
+            collection.insert_one({"subinterp": i})
+            assert collection.find_one({"subinterp": i}) is not None
+            ready.put(i)
+            # Hold the client open until every interpreter has connected, so
+            # that all of the clients are live at the same time.
+            release.get(timeout=60)
+            assert collection.find_one({"subinterp": i}) is not None
+            done.put(i)
+            """
+        )
+
+        errors: list[BaseException] = []
+
+        def run(interp):
+            try:
+                interp.exec(code)
+            except BaseException as exc:
+                errors.append(exc)
+
+        interps = []
+        threads = []
+        try:
+            for i in range(n_interpreters):
+                interp = interpreters.create()
+                interp.prepare_main(
+                    uri=client_context.uri,
+                    db_name=self.db.name,
+                    coll_name=coll_name,
+                    i=i,
+                    path=tuple(sys.path),
+                    ready=ready,
+                    release=release,
+                    done=done,
+                )
+                interps.append(interp)
+                thread = threading.Thread(target=run, args=(interp,), name=f"subinterp-{i}")
+                threads.append(thread)
+                thread.start()
+
+            started = self._get_n(ready, n_interpreters, errors)
+            self.assertEqual(started, list(range(n_interpreters)))
+            for _ in range(n_interpreters):
+                release.put(True)
+
+            for thread in threads:
+                thread.join(60)
+                self.assertFalse(thread.is_alive(), f"{thread.name} did not exit")
+
+            finished = self._get_n(done, n_interpreters, errors)
+            self.assertEqual(finished, list(range(n_interpreters)))
+            if errors:
+                self.fail(f"subinterpreter errors: {errors!r}")
+        finally:
+            # Unblock any interpreter still waiting, then destroy them all.
+            for _ in range(n_interpreters):
+                release.put(True)
+            for interp in interps:
+                # Finalize the idle interpreters: closing one runs
+                # threading._shutdown, which stops and joins pymongo's
+                # monitor threads. Skip any that are still executing to
+                # avoid masking the original error.
+                if not interp.is_running():
+                    interp.close()
+
+        found = sorted(doc["subinterp"] for doc in self.db[coll_name].find({}, {"subinterp": 1}))
+        self.assertEqual(found, list(range(n_interpreters)))
+
+    @unittest.skipUnless(
+        sys.version_info >= (3, 14), "InterpreterPoolExecutor requires Python 3.14+"
+    )
+    def test_interpreter_pool_executor(self):
+        if InterpreterPoolExecutor is None:
+            self.skipTest("InterpreterPoolExecutor is not available")
+
+        # Run live MongoClients inside interpreters managed by the standard
+        # InterpreterPoolExecutor (PYTHON-5418).  The pool's interpreters do
+        # not allow daemon threads, so pymongo must start non-daemon monitor
+        # threads and stop them when the interpreter is destroyed.
+        n_interpreters = 2
+        coll_name = f"interp-pool-{uuid.uuid4().hex}"
+        self.addCleanup(self.db.drop_collection, coll_name)
+
+        # The worker runs in an interpreter whose sys.path has not picked up
+        # the repo root, so pass the callable as a builtin (exec) and insert
+        # the main interpreter's sys.path before importing pymongo.
+        code = textwrap.dedent(
+            f"""
+            import sys
+            sys.path[:0] = {tuple(sys.path)!r}
+
+            from pymongo import MongoClient
+
+            client = MongoClient({client_context.uri!r}, serverSelectionTimeoutMS=30000)
+            collection = client.get_database({self.db.name!r}).get_collection({coll_name!r})
+            collection.insert_one({{"interp-pool": i}})
+            assert collection.find_one({{"interp-pool": i}}) is not None
+            """
+        )
+        with InterpreterPoolExecutor(max_workers=n_interpreters) as executor:
+            futures = [executor.submit(exec, code, {"i": i}) for i in range(n_interpreters)]
+            for future in futures:
+                future.result(timeout=120)
+
+        found = sorted(
+            doc["interp-pool"] for doc in self.db[coll_name].find({}, {"interp-pool": 1})
+        )
+        self.assertEqual(found, list(range(n_interpreters)))
+
+    @unittest.skipUnless(
+        sys.version_info >= (3, 14), "InterpreterPoolExecutor requires Python 3.14+"
+    )
+    def test_interpreter_pool_executor_async(self):
+        if InterpreterPoolExecutor is None:
+            self.skipTest("InterpreterPoolExecutor is not available")
+
+        # Run live AsyncMongoClients inside interpreters managed by the
+        # standard InterpreterPoolExecutor. The async client runs its
+        # background tasks on the interpreter's own event loop instead of in
+        # threads.
+        n_interpreters = 2
+        coll_name = f"interp-pool-async-{uuid.uuid4().hex}"
+        self.addCleanup(self.db.drop_collection, coll_name)
+
+        # The worker runs in an interpreter whose sys.path has not picked up
+        # the repo root, so pass the callable as a builtin (exec) and insert
+        # the main interpreter's sys.path before importing pymongo.
+        code = textwrap.dedent(
+            """
+            import asyncio
+            import sys
+            sys.path[:0] = path
+
+            from pymongo import AsyncMongoClient
+
+            async def main():
+                client = AsyncMongoClient(uri, serverSelectionTimeoutMS=30000)
+                collection = client.get_database(db_name).get_collection(coll_name)
+                await collection.insert_one({"interp-pool-async": i})
+                assert await collection.find_one({"interp-pool-async": i}) is not None
+                await client.close()
+
+            asyncio.run(main())
+            """
+        )
+        with InterpreterPoolExecutor(max_workers=n_interpreters) as executor:
+            futures = [
+                executor.submit(
+                    exec,
+                    code,
+                    {
+                        "i": i,
+                        "path": tuple(sys.path),
+                        "uri": client_context.uri,
+                        "db_name": self.db.name,
+                        "coll_name": coll_name,
+                    },
+                )
+                for i in range(n_interpreters)
+            ]
+            for future in futures:
+                future.result(timeout=120)
+
+        found = sorted(
+            doc["interp-pool-async"]
+            for doc in self.db[coll_name].find({}, {"interp-pool-async": 1})
+        )
+        self.assertEqual(found, list(range(n_interpreters)))
 
 
 if __name__ == "__main__":

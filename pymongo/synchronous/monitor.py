@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import threading
 import time
 import weakref
 from typing import TYPE_CHECKING, Any, Optional
@@ -490,3 +491,14 @@ def _shutdown_resources() -> None:
 
 if _IS_SYNC:
     atexit.register(_shutdown_resources)
+    # In subinterpreters, daemon threads are not allowed and the executors'
+    # threads are joined (unlike atexit, threading._register_atexit runs for
+    # subinterpreters), so the executors must be stopped before the
+    # interpreter tries to join them. Probe for that restriction: in the
+    # main interpreter the assignment always succeeds and the normal atexit
+    # ordering is preserved.
+    try:
+        threading.Thread().daemon = True
+    except RuntimeError:
+        if hasattr(threading, "_register_atexit"):
+            threading._register_atexit(_shutdown_resources)  # type: ignore[attr-defined]
