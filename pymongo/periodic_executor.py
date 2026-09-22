@@ -211,7 +211,11 @@ class PeriodicExecutor:
             try:
                 self._thread.join(timeout)
             except (ReferenceError, RuntimeError):
-                # Thread already terminated, or not yet started.
+                # Thread already terminated, or not yet started. This also
+                # covers a thread joining itself (RuntimeError: cannot join
+                # current thread), which happens when close() is called from
+                # within the monitor's own thread; that's safe to ignore
+                # since the thread is about to exit anyway.
                 pass
 
     def wake(self) -> None:
