@@ -950,7 +950,7 @@ class TestClient(AsyncIntegrationTest):
         self.assertIsInstance(c.nodes, frozenset)
 
         c = await self.async_rs_or_single_client(connect=False)
-        self.assertEqual(c.codec_options, CodecOptions())
+        self.assertEqual(c.codec_options, CodecOptions(document_class=dict))
         c = await self.async_rs_or_single_client(connect=False)
         self.assertFalse(await c.primary)
         self.assertFalse(await c.secondaries)
@@ -967,6 +967,20 @@ class TestClient(AsyncIntegrationTest):
         c = self.simple_client(bad_host, port, connectTimeoutMS=1, serverSelectionTimeoutMS=10)
         with self.assertRaises(ConnectionFailure):
             await c.pymongo_test.coll.find_one()
+
+    def test_document_type(self):
+        from bson.raw_bson import RawBSONDocument
+
+        for value, expected in (
+            ("dict", dict),
+            ("raw", RawBSONDocument),
+        ):
+            c = self.simple_client(connect=False, document_type=value)
+            self.assertIs(c.codec_options.document_class, expected)
+        with self.assertRaises(ValueError):
+            self.simple_client(connect=False, document_type="readonly")  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            self.simple_client(connect=False, document_class=dict, document_type="raw")
 
     async def test_init_disconnected_with_auth(self):
         uri = "mongodb://user:pass@somedomainthatdoesntexist"
@@ -1137,7 +1151,7 @@ class TestClient(AsyncIntegrationTest):
             self.assertEqual(helper_doc.keys(), cmd_doc.keys())
         client = await self.async_rs_or_single_client(document_class=SON)
         async for doc in await client.list_databases():
-            self.assertIs(type(doc), dict)
+            self.assertIs(type(doc), SON)
 
         await self.db.coll.insert_one({})
         cursor = await self.client.list_databases(filter={"name": "admin"})

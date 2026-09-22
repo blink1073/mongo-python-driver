@@ -55,10 +55,14 @@ from __future__ import annotations
 
 import copyreg
 from collections.abc import ItemsView, Iterator, Mapping
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
-from bson import _get_object_size, _raw_as_bytes, _raw_to_dict
-from bson.codec_options import _RAW_BSON_DOCUMENT_MARKER, CodecOptions
+from bson import _dict_to_bson, _get_object_size, _raw_as_bytes, _raw_keys, _raw_to_dict
+from bson.codec_options import (
+    _RAW_BSON_DOCUMENT_MARKER,
+    _RAW_BSON_VIEW_THRESHOLD,
+    CodecOptions,
+)
 from bson.codec_options import DEFAULT_CODEC_OPTIONS as DEFAULT
 
 
@@ -67,7 +71,7 @@ def _inflate_bson(
     codec_options: CodecOptions[RawBSONDocument],
     raw_array: bool = False,
 ) -> dict[str, Any]:
-    """Inflates the top level fields of a BSON document.
+    """Inflate the top level fields of a BSON document.
 
     :param bson_bytes: the BSON bytes that compose this document
     :param codec_options: An instance of
@@ -77,16 +81,60 @@ def _inflate_bson(
     return _raw_to_dict(bson_bytes, 4, len(bson_bytes) - 1, codec_options, {}, raw_array=raw_array)
 
 
+def _inflate_bson_at(
+    buffer: bytes | memoryview,
+    start: int,
+    end: int,
+    codec_options: CodecOptions[RawBSONDocument],
+    raw_array: bool = False,
+) -> dict[str, Any]:
+    """Inflate the top level fields of the document spanning ``[start, end)``.
+
+    Nested documents share ``buffer`` and store only their offsets, so no bytes
+    are copied.
+    """
+    return _raw_to_dict(buffer, start + 4, end - 1, codec_options, {}, raw_array=raw_array)
+
+
+def _holds_buffer(value: Any) -> bool:
+    """True if a decoded value still needs the raw buffer."""
+    if isinstance(value, RawBSONDocument):
+        return True
+    if isinstance(value, list):
+        return any(_holds_buffer(item) for item in value)
+    return False
+
+
+def _plain(value: Any) -> Any:
+    """Convert a decoded value to plain dicts and lists."""
+    if isinstance(value, RawBSONDocument):
+        return value.to_dict()
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _plain(item) for key, item in value.items()}
+    return value
+
+
 class RawBSONDocument(Mapping[str, Any]):
     """Representation for a MongoDB document that provides access to the raw
     BSON bytes that compose it.
 
-    Only when a field is accessed or modified within the document does
-    RawBSONDocument decode its bytes.
+    Iterating, ``len``, and ``in`` read only the top-level key names and
+    decode no values. ``__getitem__``, ``items``, and ``values`` inflate this
+    document's own level, leaving nested subdocuments as RawBSONDocument until
+    they are accessed. Call :meth:`to_dict` for a deep, mutable copy of the
+    whole document as plain dicts and lists.
+
+    A nested document stores its parent's buffer plus its byte offsets, not a
+    copy of its bytes, so a document tree holds one shared buffer. ``raw``
+    materializes this document's slice on demand.
     """
 
-    __slots__ = ("__codec_options", "__inflated_doc", "__raw")
+    __slots__ = ("__buffer", "__codec_options", "__end", "__inflated_doc", "__keys", "__start")
     _type_marker = _RAW_BSON_DOCUMENT_MARKER
+    #: Whether inflating a level releases the buffer when no child needs it.
+    _releases_buffer = True
     __codec_options: CodecOptions[RawBSONDocument]
 
     def __init__(
@@ -126,8 +174,11 @@ class RawBSONDocument(Mapping[str, Any]):
           If a :class:`~bson.codec_options.CodecOptions` is passed in, its
           `document_class` must be :class:`RawBSONDocument`.
         """
-        self.__raw = bson_bytes
+        self.__buffer = bson_bytes
+        self.__start = 0
+        self.__end = len(bson_bytes)
         self.__inflated_doc: Optional[Mapping[str, Any]] = None
+        self.__keys: Optional[tuple[str, ...]] = None
         # Can't default codec_options to DEFAULT_RAW_BSON_OPTIONS in signature,
         # it refers to this class RawBSONDocument.
         if codec_options is None:
@@ -141,9 +192,35 @@ class RawBSONDocument(Mapping[str, Any]):
         # Validate the bson object size.
         _get_object_size(bson_bytes, 0, len(bson_bytes))
 
+    @classmethod
+    def _from_buffer(
+        cls,
+        buffer: bytes | memoryview,
+        start: int,
+        end: int,
+        codec_options: CodecOptions[RawBSONDocument],
+    ) -> RawBSONDocument:
+        """Build a subdocument from a shared buffer and byte offsets.
+
+        The parent that scans this document has already validated its bounds,
+        so this bypasses :meth:`__init__`. The buffer is shared by every nested
+        document, so no bytes are copied.
+        """
+        obj = cls.__new__(cls)
+        obj.__buffer = buffer
+        obj.__start = start
+        obj.__end = end
+        obj.__codec_options = codec_options
+        obj.__inflated_doc = None
+        obj.__keys = None
+        return obj
+
     @property
     def raw(self) -> bytes | memoryview:
         """The raw BSON bytes composing this document.
+
+        Nested documents share their parent's buffer, so this materializes a
+        slice on each access rather than returning stored bytes.
 
         .. versionchanged:: 4.18
            Documents and subdocuments 4KB and larger decoded from an
@@ -153,38 +230,94 @@ class RawBSONDocument(Mapping[str, Any]):
            always :class:`bytes` copies. Call ``bytes(doc.raw)``
            to get an independent copy.
         """
-        return self.__raw
+        buffer = self.__buffer
+        start = self.__start
+        end = self.__end
+        if not buffer:
+            # The buffer was released after this level was decoded, so
+            # re-encode the decoded values.
+            return _dict_to_bson(dict(self.__inflated), False, self.__codec_options)
+        if start == 0 and end == len(buffer):
+            return buffer
+        if isinstance(buffer, bytes):
+            if end - start >= _RAW_BSON_VIEW_THRESHOLD:
+                return memoryview(buffer)[start:end]
+            return buffer[start:end]
+        # Non-immutable anchor (e.g. a memoryview): copy to bytes.
+        return bytes(buffer[start:end])
 
     def items(self) -> ItemsView[str, Any]:
         """Lazily decode and iterate elements in this document."""
         return self.__inflated.items()
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return a deep, mutable copy as plain :class:`dict` and :class:`list`.
+
+        Decoding uses this document's codec options, so timezone awareness and
+        the UUID representation are preserved. Every nested subdocument and
+        array element is decoded, not left as a :class:`RawBSONDocument`.
+        """
+        if not self.__buffer:
+            return cast("dict[str, Any]", _plain(self.__inflated))
+        opts = self.__codec_options.with_options(document_class=dict)
+        return cast(
+            "dict[str, Any]",
+            _raw_to_dict(self.__buffer, self.__start + 4, self.__end - 1, opts, {}),
+        )
+
     @property
     def __inflated(self) -> Mapping[str, Any]:
         if self.__inflated_doc is None:
-            # We already validated the object's size when this document was
-            # created, so no need to do that again.
-            self.__inflated_doc = self._inflate_bson(self.__raw, self.__codec_options)
+            # The parent that scanned this document already validated its
+            # bounds, so no need to validate again here.
+            self.__inflated_doc = self._inflate_bson(
+                self.__buffer, self.__start, self.__end, self.__codec_options
+            )
+            # Release the buffer when nothing in this level still needs it, so
+            # a decoded document does not retain both the bytes and the values.
+            if self._releases_buffer and not any(
+                _holds_buffer(value) for value in self.__inflated_doc.values()
+            ):
+                self.__buffer = b""
+                self.__start = 0
+                self.__end = 0
         return self.__inflated_doc
 
     @staticmethod
     def _inflate_bson(
-        bson_bytes: bytes | memoryview, codec_options: CodecOptions[RawBSONDocument]
+        buffer: bytes | memoryview,
+        start: int,
+        end: int,
+        codec_options: CodecOptions[RawBSONDocument],
     ) -> Mapping[str, Any]:
-        return _inflate_bson(bson_bytes, codec_options)
+        return _inflate_bson_at(buffer, start, end, codec_options)
+
+    def _keys(self) -> tuple[str, ...]:
+        """Return this document's top-level keys without decoding values."""
+        if self.__keys is None:
+            if not self.__buffer:
+                self.__keys = tuple(self.__inflated)
+            else:
+                self.__keys = _raw_keys(
+                    self.__buffer, self.__start, self.__end, self.__codec_options
+                )
+        return self.__keys
 
     def __getitem__(self, item: str) -> Any:
         return self.__inflated[item]
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self.__inflated)
+        return iter(self._keys())
 
     def __len__(self) -> int:
-        return len(self.__inflated)
+        return len(self._keys())
+
+    def __contains__(self, item: Any) -> bool:
+        return item in self._keys()
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, RawBSONDocument):
-            return self.__raw == other.raw
+            return self.raw == other.raw
         return NotImplemented
 
     __hash__ = None  # type: ignore[assignment]
@@ -195,13 +328,17 @@ class RawBSONDocument(Mapping[str, Any]):
             for name in copyreg._slotnames(type(self))  # type: ignore[attr-defined]
             if hasattr(self, name)
         }
-        slots_state["_RawBSONDocument__raw"] = _raw_as_bytes(self.__raw)
+        raw_bytes = _raw_as_bytes(self.raw)
+        slots_state["_RawBSONDocument__buffer"] = raw_bytes
+        slots_state["_RawBSONDocument__start"] = 0
+        slots_state["_RawBSONDocument__end"] = len(raw_bytes)
         slots_state["_RawBSONDocument__inflated_doc"] = None
+        slots_state["_RawBSONDocument__keys"] = None
         return getattr(self, "__dict__", None), slots_state
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}({_raw_as_bytes(self.__raw)!r}, "
+            f"{self.__class__.__name__}({_raw_as_bytes(self.raw)!r}, "
             f"codec_options={self.__codec_options!r})"
         )
 
@@ -209,11 +346,17 @@ class RawBSONDocument(Mapping[str, Any]):
 class _RawArrayBSONDocument(RawBSONDocument):
     """A RawBSONDocument that only expands sub-documents and arrays when accessed."""
 
+    # Arrays stay as raw bytes, so releasing the buffer would lose them.
+    _releases_buffer = False
+
     @staticmethod
     def _inflate_bson(
-        bson_bytes: bytes | memoryview, codec_options: CodecOptions[RawBSONDocument]
+        buffer: bytes | memoryview,
+        start: int,
+        end: int,
+        codec_options: CodecOptions[RawBSONDocument],
     ) -> Mapping[str, Any]:
-        return _inflate_bson(bson_bytes, codec_options, raw_array=True)
+        return _inflate_bson_at(buffer, start, end, codec_options, raw_array=True)
 
 
 DEFAULT_RAW_BSON_OPTIONS: CodecOptions[RawBSONDocument] = DEFAULT.with_options(

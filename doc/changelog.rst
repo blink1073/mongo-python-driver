@@ -7,6 +7,26 @@ Changes in Version 4.19.0 (2026/XX/XX)
 PyMongo 4.19 brings a number of changes including:
 
 - Added support for Python 3.15.
+- :class:`~bson.raw_bson.RawBSONDocument` now releases the raw buffer once a
+  level has been decoded and no child document still needs it, so a decoded
+  document no longer holds both the bytes and the decoded values. ``raw``
+  re-encodes after the buffer is released.
+- Iterating a :class:`~bson.raw_bson.RawBSONDocument`, and calling ``len`` or
+  ``in`` on one, reads only the top-level key names and decodes no values.
+  Nested subdocuments share the parent's buffer instead of copying their bytes.
+- Added :meth:`~bson.raw_bson.RawBSONDocument.to_dict`, which returns a deep,
+  mutable copy as plain :class:`dict` and :class:`list` values. It decodes with
+  the document's own codec options.
+- Added a ``document_type`` option to
+  :class:`~bson.codec_options.CodecOptions` and
+  :class:`~pymongo.synchronous.mongo_client.MongoClient` as a shorthand for
+  ``document_class``:
+
+  - ``"dict"`` decodes everything into a :class:`dict`. This is the default.
+  - ``"raw"`` returns the read-only
+    :class:`~bson.raw_bson.RawBSONDocument` and avoids decoding until a value is
+    accessed. Use :meth:`~bson.raw_bson.RawBSONDocument.to_dict` for a plain,
+    mutable copy.
 
 Bug fixes
 .........

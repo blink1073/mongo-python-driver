@@ -89,6 +89,8 @@ struct module_state {
 
 #define GETSTATE(m) ((struct module_state*)PyModule_GetState(m))
 
+static int _get_buffer(PyObject *exporter, Py_buffer *view);
+
 /* Maximum number of regex flags */
 #define FLAGS_SIZE 7
 
@@ -255,6 +257,10 @@ static int write_raw_doc(buffer_t buffer, PyObject* raw, PyObject* _raw);
  * Returns 1 on success or 0 on failure with an exception set.
  */
 static int _get_buffer(PyObject *exporter, Py_buffer *view);
+
+
+static PyObject* _prepare_input_buffer(PyObject* self, PyObject* bson,
+                                       const codec_options_t* options);
 
 #if PY_VERSION_HEX >= PYTHON_3_12
 /* Transfer traceback from old_exc to new_exc.
@@ -1365,8 +1371,8 @@ static int _write_element_to_buffer(PyObject* self, buffer_t buffer,
         }
     case 101:
         {
-            /* RawBSONDocument */
-            if (!write_raw_doc(buffer, value, state->_raw_str)) {
+            /* RawBSONDocument/Document */
+            if (!write_dict(self, buffer, value, check_keys, options, 0)) {
                 return 0;
             }
             *(pymongo_buffer_get_buffer(buffer) + type_byte) = 0x03;
@@ -1891,9 +1897,16 @@ int write_dict(PyObject* self, buffer_t buffer,
     int length_location;
     struct module_state *state = GETSTATE(self);
     long type_marker;
-    int is_dict = PyDict_Check(dict);
+    int is_dict;
     if (!state) {
         return 0;
+    }
+    is_dict = PyDict_Check(dict);
+    if (is_dict && !PyDict_CheckExact(dict)) {
+        type_marker = _type_marker(dict, state->_type_marker_str);
+        if (type_marker < 0) {
+            return 0;
+        }
     }
 
     if (!is_dict) {
@@ -2048,19 +2061,20 @@ static PyObject* _cbson_dict_to_bson(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    /* check for RawBSONDocument */
+    /* check for RawBSONDocument/Document */
     type_marker = _type_marker(dict, state->_type_marker_str);
     if (type_marker < 0) {
         destroy_codec_options(&options);
         return NULL;
-    } else if (101 == type_marker) {
+    }
+    if (101 == type_marker) {
+        /* Raw document classes encode as their raw bytes. */
         destroy_codec_options(&options);
         raw_bson_document_bytes_obj = PyObject_GetAttr(dict, state->_raw_str);
         if (NULL == raw_bson_document_bytes_obj) {
             return NULL;
         }
-        /* raw may be a memoryview but
-         * encoding must always produce bytes. */
+        /* raw may be a memoryview but encoding must always produce bytes. */
         if (!PyBytes_Check(raw_bson_document_bytes_obj)) {
             PyObject* as_bytes = PyBytes_FromObject(raw_bson_document_bytes_obj);
             Py_DECREF(raw_bson_document_bytes_obj);
@@ -2223,6 +2237,7 @@ static PyObject* get_value(PyObject* self, PyObject* name, const char* buffer,
             }
 
             if (options->is_raw_bson) {
+                /* Documents and DBRef conversion are handled lazily. */
                 *position += size;
                 break;
             }
@@ -2867,29 +2882,47 @@ static int _element_to_dict(PyObject* self, const char* string,
 }
 
 static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
-    char* string;
-    PyObject* bson;
+    const char* string;
+    PyObject* data;
+    PyObject* bson = NULL;
     PyObject* options_obj = NULL;
     codec_options_t options;
     unsigned position;
     unsigned max;
     int new_position;
     int raw_array = 0;
-    PyObject* name;
-    PyObject* value;
+    PyObject* name = NULL;
+    PyObject* value = NULL;
     PyObject* result_tuple = NULL;
+    Py_buffer view = {0};
 
-    if (!(PyArg_ParseTuple(args, "OIIOp", &bson, &position, &max,
+    if (!(PyArg_ParseTuple(args, "OIIOp", &data, &position, &max,
                           &options_obj, &raw_array) &&
             convert_codec_options(self, options_obj, &options))) {
         return NULL;
     }
 
-    if (!PyBytes_Check(bson)) {
-        PyErr_SetString(PyExc_TypeError, "argument to _element_to_dict must be a bytes object");
+    bson = _prepare_input_buffer(self, data, &options);
+    if (!bson) {
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    if (!_get_buffer(bson, &view)) {
+        Py_DECREF(bson);
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    string = (const char*)view.buf;
+    if (position > max || (Py_ssize_t)max >= view.len) {
+        PyObject* InvalidBSON = _error("InvalidBSON");
+        if (InvalidBSON) {
+            PyErr_SetString(InvalidBSON, "bad object or element length");
+            Py_DECREF(InvalidBSON);
+        }
         goto done;
     }
-    string = PyBytes_AS_STRING(bson);
     options.buffer_owner = bson;
 
     new_position = _element_to_dict(self, string, position, max, &options, raw_array, &name, &value);
@@ -2904,6 +2937,8 @@ static PyObject* _cbson_element_to_dict(PyObject* self, PyObject* args) {
     }
 
 done:
+    PyBuffer_Release(&view);
+    Py_DECREF(bson);
     destroy_codec_options(&options);
     return result_tuple;
 }
@@ -2969,50 +3004,46 @@ static PyObject* elements_to_dict(PyObject* self, const char* string,
                                   const codec_options_t* options) {
     PyObject* result;
     if (options->is_raw_bson) {
-        PyObject* bson_bytes;
-        PyObject* buffer_owner = options->buffer_owner;
-        int owner_is_bytes = buffer_owner && PyBytes_Check(buffer_owner);
-        Py_ssize_t offset = 0;
-        if (owner_is_bytes) {
-            offset = string - PyBytes_AS_STRING(buffer_owner);
-            if (offset < 0 ||
-                offset + (Py_ssize_t)max > PyBytes_GET_SIZE(buffer_owner)) {
-                PyObject* InvalidBSON = _error("InvalidBSON");
-                if (InvalidBSON) {
-                    PyErr_SetString(InvalidBSON, "invalid buffer offset");
-                    Py_DECREF(InvalidBSON);
-                }
-                return NULL;
-            }
-        }
-        if (owner_is_bytes && offset == 0 &&
-            (Py_ssize_t)max == PyBytes_GET_SIZE(buffer_owner)) {
-            /* The document spans the entire buffer, pass the buffer
-             * itself through. */
-            bson_bytes = buffer_owner;
-            Py_INCREF(bson_bytes);
-        } else if (owner_is_bytes &&
-                   (Py_ssize_t)max >= GETSTATE(self)->raw_bson_view_threshold) {
-            /* Zero-copy: pass a read-only slice of the buffer instead of a
-             * bytes copy. Only immutable (bytes) buffers may be sliced this
-             * way, mutable buffers must be copied so
-             * the caller can't mutate the document after decoding. */
-            PyObject* top_view = PyMemoryView_FromObject(buffer_owner);
-            if (!top_view) {
-                return NULL;
-            }
-            bson_bytes = PySequence_GetSlice(top_view, offset,
-                                             offset + (Py_ssize_t)max);
-            Py_DECREF(top_view);
-        } else {
-            bson_bytes = PyBytes_FromStringAndSize(string, max);
-        }
-        if (!bson_bytes) {
+        /* Build a nested RawBSONDocument from a buffer plus offsets. Share the
+         * owner buffer when it is immutable bytes; copy the document's bytes
+         * when the owner is mutable so the result cannot alias it. */
+        PyObject* owner = options->buffer_owner;
+        Py_buffer owner_view = {0};
+        PyObject* anchor = NULL;
+        PyObject* from_buffer;
+        Py_ssize_t start;
+        if (!owner || !_get_buffer(owner, &owner_view)) {
+            PyErr_SetString(PyExc_ValueError, "invalid raw BSON buffer owner");
             return NULL;
         }
-        PyObject* raw_args[2] = {bson_bytes, options->options_obj};
-        result = PyObject_Vectorcall(options->document_class, raw_args, 2, NULL);
-        Py_DECREF(bson_bytes);
+        if (PyBytes_Check(owner)) {
+            start = (const char*)string - (const char*)owner_view.buf;
+            if (start < 0 || (Py_ssize_t)max > owner_view.len - start) {
+                PyBuffer_Release(&owner_view);
+                PyErr_SetString(PyExc_ValueError, "invalid raw BSON buffer offset");
+                return NULL;
+            }
+            anchor = owner;
+            Py_INCREF(anchor);
+        } else {
+            anchor = PyBytes_FromStringAndSize(string, max);
+            start = 0;
+        }
+        PyBuffer_Release(&owner_view);
+        if (!anchor) {
+            return NULL;
+        }
+        from_buffer = PyObject_GetAttrString((PyObject*)options->document_class,
+                                             "_from_buffer");
+        if (!from_buffer) {
+            Py_DECREF(anchor);
+            return NULL;
+        }
+        result = PyObject_CallFunction(from_buffer, "OnnO", anchor, start,
+                                       start + (Py_ssize_t)max,
+                                       options->options_obj);
+        Py_DECREF(from_buffer);
+        Py_DECREF(anchor);
         return result;
     }
     if (Py_EnterRecursiveCall(" while decoding a BSON document"))
@@ -3181,6 +3212,311 @@ done:
     Py_DECREF(bson);
     destroy_codec_options(&options);
     return ret;
+}
+
+/* Set InvalidBSON with `message` and return -1. */
+static int _invalid_bson(const char* message) {
+    PyObject* InvalidBSON = _error("InvalidBSON");
+    if (InvalidBSON) {
+        PyErr_SetString(InvalidBSON, message);
+        Py_DECREF(InvalidBSON);
+    }
+    return -1;
+}
+
+/* Set InvalidBSON for an unknown element type and return -1. */
+static int _invalid_bson_type(unsigned char type, PyObject* name) {
+    PyObject* InvalidBSON = _error("InvalidBSON");
+    PyObject* type_bytes;
+    if (!InvalidBSON) {
+        return -1;
+    }
+    type_bytes = PyBytes_FromStringAndSize((const char*)&type, 1);
+    if (!type_bytes) {
+        Py_DECREF(InvalidBSON);
+        return -1;
+    }
+    PyErr_Format(
+        InvalidBSON,
+        "Detected unknown BSON type %R for fieldname '%U'. "
+        "Are you using the latest driver version?",
+        type_bytes, name);
+    Py_DECREF(type_bytes);
+    Py_DECREF(InvalidBSON);
+    return -1;
+}
+
+/* Advance *position past the value of `type` without decoding it, checking
+ * only enough structure to locate the next element. `max` bounds the
+ * enclosing document. Deeper contents are validated lazily on access. */
+static int _validate_value(PyObject* self, const char* string, unsigned* position,
+                           unsigned max, unsigned char type, PyObject* name,
+                           const codec_options_t* options) {
+    unsigned pos = *position;
+    switch (type) {
+    case 0x01: /* double */
+    case 0x09: /* datetime */
+    case 0x11: /* timestamp */
+    case 0x12: /* int64 */
+        if (pos + 8 > max) {
+            return _invalid_bson("invalid value length");
+        }
+        *position = pos + 8;
+        return 0;
+    case 0x10: /* int32 */
+        if (pos + 4 > max) {
+            return _invalid_bson("invalid value length");
+        }
+        *position = pos + 4;
+        return 0;
+    case 0x13: /* decimal128 */
+        if (pos + 16 > max) {
+            return _invalid_bson("invalid value length");
+        }
+        *position = pos + 16;
+        return 0;
+    case 0x07: /* objectid */
+        if (pos + 12 > max) {
+            return _invalid_bson("invalid value length");
+        }
+        *position = pos + 12;
+        return 0;
+    case 0x08: /* boolean */
+        if (pos + 1 > max) {
+            return _invalid_bson("invalid value length");
+        }
+        if (string[pos] != 0 && string[pos] != 1) {
+            return _invalid_bson("invalid boolean value");
+        }
+        *position = pos + 1;
+        return 0;
+    case 0x06: /* undefined */
+    case 0x0A: /* null */
+    case 0x7F: /* maxkey */
+    case 0xFF: /* minkey */
+        return 0;
+    case 0x02: /* string */
+    case 0x0D: /* code */
+    case 0x0E: /* symbol */
+        {
+            int32_t length;
+            if (pos + 4 > max) {
+                return _invalid_bson("invalid string length");
+            }
+            memcpy(&length, string + pos, 4);
+            length = (int32_t)BSON_UINT32_FROM_LE(length);
+            if (length < 1 || pos + 4 + (unsigned)length > max) {
+                return _invalid_bson("invalid string length");
+            }
+            if (string[pos + 4 + (unsigned)length - 1]) {
+                return _invalid_bson("invalid end of string");
+            }
+            *position = pos + 4 + (unsigned)length;
+            return 0;
+        }
+    case 0x03: /* embedded document */
+    case 0x04: /* array */
+        {
+            int32_t size;
+            unsigned obj_end;
+            if (pos + 4 > max) {
+                return _invalid_bson("invalid object length");
+            }
+            memcpy(&size, string + pos, 4);
+            size = (int32_t)BSON_UINT32_FROM_LE(size);
+            if (size < BSON_MIN_SIZE || pos + (unsigned)size > max) {
+                return _invalid_bson("invalid object length");
+            }
+            obj_end = pos + (unsigned)size - 1;
+            if (string[obj_end]) {
+                return _invalid_bson("bad eoo");
+            }
+            /* Deeper contents are validated lazily on access. */
+            *position = obj_end + 1;
+            return 0;
+        }
+    case 0x05: /* binary */
+        {
+            int32_t length;
+            unsigned char subtype;
+            if (pos + 5 > max) {
+                return _invalid_bson("invalid binary length");
+            }
+            memcpy(&length, string + pos, 4);
+            length = (int32_t)BSON_UINT32_FROM_LE(length);
+            subtype = (unsigned char)string[pos + 4];
+            pos += 5;
+            if (subtype == 2) {
+                int32_t length2;
+                if (pos + 4 > max) {
+                    return _invalid_bson("invalid binary length");
+                }
+                memcpy(&length2, string + pos, 4);
+                length2 = (int32_t)BSON_UINT32_FROM_LE(length2);
+                if (length2 != length - 4) {
+                    return _invalid_bson("invalid binary (st 2) - lengths don't match!");
+                }
+                pos += 4;
+                length = length2;
+            }
+            if (length < 0 || pos + (unsigned)length > max) {
+                return _invalid_bson("bad binary object length");
+            }
+            *position = pos + (unsigned)length;
+            return 0;
+        }
+    case 0x0B: /* regex: two c-strings */
+        while (pos < max && string[pos]) {
+            pos++;
+        }
+        if (pos >= max) {
+            return _invalid_bson("invalid regex");
+        }
+        pos++;
+        while (pos < max && string[pos]) {
+            pos++;
+        }
+        if (pos >= max) {
+            return _invalid_bson("invalid regex");
+        }
+        *position = pos + 1;
+        return 0;
+    case 0x0C: /* dbpointer: string + 12 */
+        {
+            int32_t length;
+            if (pos + 4 > max) {
+                return _invalid_bson("invalid string length");
+            }
+            memcpy(&length, string + pos, 4);
+            length = (int32_t)BSON_UINT32_FROM_LE(length);
+            if (length < 1 || pos + 4 + (unsigned)length + 12 > max) {
+                return _invalid_bson("invalid string length");
+            }
+            if (string[pos + 4 + (unsigned)length - 1]) {
+                return _invalid_bson("invalid end of string");
+            }
+            *position = pos + 4 + (unsigned)length + 12;
+            return 0;
+        }
+    case 0x0F: /* code with scope */
+        {
+            int32_t total;
+            if (pos + 4 > max) {
+                return _invalid_bson("invalid code_w_scope length");
+            }
+            memcpy(&total, string + pos, 4);
+            total = (int32_t)BSON_UINT32_FROM_LE(total);
+            if (total < BSON_MIN_SIZE || pos + (unsigned)total > max) {
+                return _invalid_bson("invalid code_w_scope length");
+            }
+            /* The code and scope are validated lazily on access. */
+            *position = pos + (unsigned)total;
+            return 0;
+        }
+    default:
+        return _invalid_bson_type(type, name);
+    }
+}
+
+/* Return a tuple of the top-level key names of the BSON document spanning
+ * [start, end) in `data`, without decoding any values. Malformed documents
+ * raise InvalidBSON. */
+static PyObject* _cbson_raw_keys(PyObject* self, PyObject* args) {
+    PyObject* data;
+    unsigned start;
+    unsigned end;
+    PyObject* options_obj = NULL;
+    PyObject* bson = NULL;
+    PyObject* keys = NULL;
+    PyObject* result = NULL;
+    codec_options_t options;
+    Py_buffer view = {0};
+    const char* string;
+    int32_t size;
+    unsigned position;
+    unsigned obj_end;
+
+    if (!(PyArg_ParseTuple(args, "OIIO", &data, &start, &end, &options_obj) &&
+            convert_codec_options(self, options_obj, &options))) {
+        return NULL;
+    }
+
+    bson = _prepare_input_buffer(self, data, &options);
+    if (!bson) {
+        destroy_codec_options(&options);
+        return NULL;
+    }
+    if (!_get_buffer(bson, &view)) {
+        Py_DECREF(bson);
+        destroy_codec_options(&options);
+        return NULL;
+    }
+    string = (const char*)view.buf;
+    if (start > end || end > (unsigned)view.len ||
+        end - start < BSON_MIN_SIZE) {
+        _invalid_bson("not enough data for a BSON document");
+        goto done;
+    }
+    memcpy(&size, string + start, 4);
+    size = (int32_t)BSON_UINT32_FROM_LE(size);
+    if (size < BSON_MIN_SIZE || start + (unsigned)size != end) {
+        _invalid_bson("invalid object length");
+        goto done;
+    }
+    obj_end = end - 1;
+    if (string[obj_end]) {
+        _invalid_bson("bad eoo");
+        goto done;
+    }
+
+    keys = PyList_New(0);
+    if (!keys) {
+        goto done;
+    }
+    position = start + 4;
+    while (position < obj_end) {
+        unsigned char type = (unsigned char)string[position++];
+        size_t name_length = strlen(string + position);
+        PyObject* name;
+        if (name_length > BSON_MAX_SIZE || position + name_length >= obj_end) {
+            _invalid_bson("bad object or element length");
+            goto done;
+        }
+        name = PyUnicode_DecodeUTF8(
+            string + position, name_length,
+            options.unicode_decode_error_handler);
+        if (!name) {
+            _rewrap_as_invalid_bson();
+            goto done;
+        }
+        position += (unsigned)name_length + 1;
+        if (_validate_value(self, string, &position, obj_end, type, name,
+                            &options) < 0) {
+            Py_DECREF(name);
+            goto done;
+        }
+        if (PyList_Append(keys, name) < 0) {
+            Py_DECREF(name);
+            goto done;
+        }
+        Py_DECREF(name);
+    }
+    if (position != obj_end) {
+        _invalid_bson("bad object or element length");
+        goto done;
+    }
+    result = PyList_AsTuple(keys);
+
+done:
+    Py_XDECREF(keys);
+    PyBuffer_Release(&view);
+    Py_DECREF(bson);
+    destroy_codec_options(&options);
+    if (PyErr_Occurred()) {
+        Py_XDECREF(result);
+        return NULL;
+    }
+    return result;
 }
 
 static PyObject* _cbson_bson_to_dict(PyObject* self, PyObject* args) {
@@ -3514,6 +3850,8 @@ static PyMethodDef _CBSONMethods[] = {
      "Decode a single key, value pair."},
     {"_raw_to_dict", _cbson_raw_to_dict, METH_VARARGS,
      "Decode all elements of a raw BSON document into a result mapping."},
+    {"_raw_keys", _cbson_raw_keys, METH_VARARGS,
+     "Return a BSON document's top-level keys without decoding values."},
     {"_array_of_documents_to_buffer", _cbson_array_of_documents_to_buffer, METH_VARARGS, "Convert raw array of documents to a stream of BSON documents"},
     {"_test_long_long_to_str", _test_long_long_to_str, METH_VARARGS, "Test conversion of extreme and common Py_ssize_t values to str."},
     {NULL, NULL, 0, NULL}
@@ -3623,6 +3961,7 @@ static int
 _cbson_exec(PyObject *m)
 {
     PyObject *c_api_object;
+    struct module_state* state;
     static void *_cbson_API[_cbson_API_POINTER_COUNT];
 
     PyDateTime_IMPORT;
@@ -3650,6 +3989,13 @@ _cbson_exec(PyObject *m)
 
     /* Import several python objects */
     if (_load_python_objects(m)) {
+        Py_DECREF(c_api_object);
+        Py_DECREF(m);
+        INITERROR;
+    }
+
+    state = GETSTATE(m);
+    if (state == NULL) {
         Py_DECREF(c_api_object);
         Py_DECREF(m);
         INITERROR;

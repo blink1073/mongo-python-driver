@@ -29,7 +29,6 @@ list                                     array          both
 dict                                     object         both
 :class:`~bson.son.SON`                   object         both
 :py:class:`~collections.abc.Mapping`     object         py -> bson
-:class:`~bson.raw_bson.RawBSONDocument`  object         both [#raw]_
 datetime.datetime [#dt]_ [#dt2]_         UTC datetime   both
 :class:`~bson.datetime_ms.DatetimeMS`    UTC datetime   both [#dt3]_
 :class:`~bson.regex.Regex`               regex          both
@@ -52,8 +51,9 @@ bytes [#bytes]_                          binary         both
 .. [#int] A Python int will be saved as a BSON int32 or BSON int64 depending
    on its size. A BSON int32 will always decode to a Python int. A BSON
    int64 will always decode to a :class:`~bson.int64.Int64`.
-.. [#raw] Decoding a bson object to :class:`~bson.raw_bson.RawBSONDocument` can be
-   optionally configured via :attr:`~bson.codec_options.CodecOptions.document_class`.
+.. [#raw] Decoding a bson object to :class:`~bson.raw_bson.RawBSONDocument`
+   can be optionally configured via
+   :attr:`~bson.codec_options.CodecOptions.document_class`.
 .. [#dt] datetime.datetime instances are encoded with millisecond precision so
    the microsecond field is truncated.
 .. [#dt2] all datetime.datetime instances are encoded as UTC. By default, they
@@ -331,8 +331,11 @@ def _get_object(
     """Decode a BSON subdocument to opts.document_class or bson.dbref.DBRef."""
     obj_size, end = _get_object_size(data, position, obj_end)
     if _raw_document_class(opts.document_class):
-        buf = _raw_slice(data, view, position, end, obj_size)
-        return (opts.document_class(buf, opts), position + obj_size)
+        # Share the buffer and store offsets instead of copying the slice.
+        return (
+            opts.document_class._from_buffer(data, position, position + obj_size, opts),
+            position + obj_size,
+        )
 
     obj = _elements_to_dict(data, view, position + 4, end, opts)
 
@@ -562,36 +565,39 @@ if _USE_C:
             _cbson._element_to_dict(data, position, obj_end, opts, raw_array),
         )
 
-else:
 
-    def _element_to_dict(
-        data: Any,
-        view: Any,
-        position: int,
-        obj_end: int,
-        opts: CodecOptions[Any],
-        raw_array: bool = False,
-    ) -> tuple[str, Any, int]:
-        """Decode a single key, value pair."""
-        element_type = data[position]
-        position += 1
-        element_name, position = _get_c_string(data, view, position, opts)
-        if raw_array and element_type == ord(BSONARR):
-            _, end = _get_object_size(data, position, len(data))
-            return element_name, view[position : end + 1], end + 1
-        try:
-            value, position = _ELEMENT_GETTER[element_type](
-                data, view, position, obj_end, opts, element_name
-            )
-        except KeyError:
-            _raise_unknown_type(element_type, element_name)
+def _python_element_to_dict(
+    data: Any,
+    view: Any,
+    position: int,
+    obj_end: int,
+    opts: CodecOptions[Any],
+    raw_array: bool = False,
+) -> tuple[str, Any, int]:
+    """Decode a single key, value pair (pure-Python implementation)."""
+    element_type = data[position]
+    position += 1
+    element_name, position = _get_c_string(data, view, position, opts)
+    if raw_array and element_type == ord(BSONARR):
+        _, end = _get_object_size(data, position, len(data))
+        return element_name, view[position : end + 1], end + 1
+    try:
+        value, position = _ELEMENT_GETTER[element_type](
+            data, view, position, obj_end, opts, element_name
+        )
+    except KeyError:
+        _raise_unknown_type(element_type, element_name)
 
-        if opts.type_registry._decoder_map:
-            custom_decoder = opts.type_registry._decoder_map.get(type(value))
-            if custom_decoder is not None:
-                value = custom_decoder(value)
+    if opts.type_registry._decoder_map:
+        custom_decoder = opts.type_registry._decoder_map.get(type(value))
+        if custom_decoder is not None:
+            value = custom_decoder(value)
 
-        return element_name, value, position
+    return element_name, value, position
+
+
+if not _USE_C:
+    _element_to_dict = _python_element_to_dict
 
 
 _T = TypeVar("_T", bound=MutableMapping[str, Any])
@@ -623,6 +629,123 @@ else:
         return cast(
             _T, _elements_to_dict(data, view, position, obj_end, opts, result, raw_array=raw_array)
         )
+
+
+def _validate_value(
+    data: Any,
+    view: Any,
+    position: int,
+    obj_end: int,
+    element_type: int,
+    name: str,
+    codec_options: Any,
+) -> int:
+    """Validate a value without decoding it, returning the next element offset."""
+    if element_type in (0x01, 0x09, 0x11, 0x12):  # double, datetime, timestamp, int64
+        if position + 8 > obj_end:
+            raise InvalidBSON("invalid value length")
+        return position + 8
+    if element_type == 0x10:  # int32
+        if position + 4 > obj_end:
+            raise InvalidBSON("invalid value length")
+        return position + 4
+    if element_type == 0x13:  # decimal128
+        if position + 16 > obj_end:
+            raise InvalidBSON("invalid value length")
+        return position + 16
+    if element_type == 0x07:  # objectid
+        if position + 12 > obj_end:
+            raise InvalidBSON("invalid value length")
+        return position + 12
+    if element_type == 0x08:  # boolean
+        if position + 1 > obj_end:
+            raise InvalidBSON("invalid value length")
+        if data[position] not in (0, 1):
+            raise InvalidBSON("invalid boolean value")
+        return position + 1
+    if element_type in (0x06, 0x0A, 0x7F, 0xFF):  # undefined, null, maxkey, minkey
+        return position
+    if element_type in (0x02, 0x0D, 0x0E):  # string, code, symbol
+        length = _UNPACK_INT_FROM(data, position)[0]
+        if length < 1 or position + 4 + length > obj_end:
+            raise InvalidBSON("invalid string length")
+        if data[position + 4 + length - 1] != 0:
+            raise InvalidBSON("invalid end of string")
+        return position + 4 + length
+    if element_type in (0x03, 0x04):  # document, array
+        _, end = _get_object_size(data, position, obj_end)
+        return end + 1
+    if element_type == 0x05:  # binary
+        length, subtype = _UNPACK_LENGTH_SUBTYPE_FROM(data, position)
+        position += 5
+        if subtype == 2:
+            length2 = _UNPACK_INT_FROM(data, position)[0]
+            if length2 != length - 4:
+                raise InvalidBSON("invalid binary (st 2) - lengths don't match!")
+            position += 4
+            length = length2
+        if length < 0 or position + length > obj_end:
+            raise InvalidBSON("bad binary object length")
+        return position + length
+    if element_type == 0x0B:  # regex
+        _, position = _get_c_string(data, view, position, codec_options)
+        _, position = _get_c_string(data, view, position, codec_options)
+        return position
+    if element_type == 0x0C:  # dbpointer
+        length = _UNPACK_INT_FROM(data, position)[0]
+        if length < 1 or position + 4 + length + 12 > obj_end:
+            raise InvalidBSON("invalid string length")
+        if data[position + 4 + length - 1] != 0:
+            raise InvalidBSON("invalid end of string")
+        return position + 4 + length + 12
+    if element_type == 0x0F:  # code with scope
+        total = _UNPACK_INT_FROM(data, position)[0]
+        code_end = position + total
+        if total < 5 or code_end > obj_end:
+            raise InvalidBSON("invalid code_w_scope length")
+        return code_end
+    raise InvalidBSON(
+        f"Detected unknown BSON type {chr(element_type).encode()!r} for fieldname "
+        f"'{name}'. Are you using the latest driver version?"
+    )
+
+
+def _python_raw_keys(data: Any, start: int, end: int, opts: CodecOptions[Any]) -> tuple[str, ...]:
+    """Return a BSON document's top-level keys without decoding values.
+
+    The document spans ``[start, end)`` within ``data``.
+    """
+    data, view = get_data_and_view(data)
+    if end - start < 5:
+        raise InvalidBSON("not enough data for a BSON document")
+    size = _UNPACK_INT_FROM(data, start)[0]
+    if size < 5 or start + size != end:
+        raise InvalidBSON("invalid object length")
+    obj_end = end - 1
+    if data[obj_end] != 0:
+        raise InvalidBSON("bad eoo")
+    position = start + 4
+    keys: list[str] = []
+    try:
+        while position < obj_end:
+            element_type = data[position]
+            position += 1
+            name, position = _get_c_string(data, view, position, opts)
+            position = _validate_value(data, view, position, obj_end, element_type, name, opts)
+            keys.append(name)
+        if position != obj_end:
+            raise InvalidBSON("bad object or element length")
+    except InvalidBSON:
+        raise
+    except Exception:
+        raise InvalidBSON("bad object or element length") from None
+    return tuple(keys)
+
+
+if _USE_C:
+    _raw_keys = _cbson._raw_keys
+else:
+    _raw_keys = _python_raw_keys
 
 
 def _elements_to_dict(
@@ -1134,7 +1257,6 @@ def _decode_all(data: _ReadableBuffer, opts: CodecOptions[_DocumentType]) -> lis
     docs: list[_DocumentType] = []
     position = 0
     end = data_len - 1
-    use_raw = _raw_document_class(opts.document_class)
     try:
         while position < end:
             obj_size = _UNPACK_INT_FROM(data, position)[0]
@@ -1145,7 +1267,7 @@ def _decode_all(data: _ReadableBuffer, opts: CodecOptions[_DocumentType]) -> lis
             obj_end = position + obj_size - 1
             if data[obj_end] != 0:
                 raise InvalidBSON("bad eoo")
-            if use_raw:
+            if _raw_document_class(opts.document_class):
                 raw_buf = _raw_slice(data, view, position, obj_end, obj_size)
                 docs.append(opts.document_class(raw_buf, opts))  # type: ignore
             else:
@@ -1402,7 +1524,7 @@ def decode_file_iter(
             raise InvalidBSON("cut off in middle of objsize")
         obj_size = _UNPACK_INT_FROM(size_data, 0)[0] - 4
         elements = size_data + file_obj.read(max(0, obj_size))
-        yield _bson_to_dict(elements, opts)  # type:ignore[misc]
+        yield _bson_to_dict(elements, opts)
 
 
 def is_valid(bson: bytes) -> bool:

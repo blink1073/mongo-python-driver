@@ -590,16 +590,17 @@ class TestCommandDocumentType(unittest.TestCase):
 class TestCodecOptionsDocumentType(unittest.TestCase):
     def test_default(self) -> None:
         options: CodecOptions = CodecOptions()
+        assert options.document_class is dict
         obj = options.document_class()
         obj["a"] = 1
 
     def test_explicit_document_type(self) -> None:
-        options: CodecOptions[dict[str, Any]] = CodecOptions()
+        options: CodecOptions[dict[str, Any]] = CodecOptions(document_class=dict)
         obj = options.document_class()
         obj["a"] = 1
 
     def test_typeddict_document_type(self) -> None:
-        options: CodecOptions[Movie] = CodecOptions()
+        options: CodecOptions[Movie] = CodecOptions(document_class=Movie)
         # Suppress: Cannot instantiate type "Type[Movie]".
         obj = options.document_class(name="a", year=1)
         assert obj["year"] == 1

@@ -26,6 +26,7 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Literal,
     NamedTuple,
     Optional,
     Union,
@@ -50,6 +51,25 @@ def _raw_document_class(document_class: Any) -> bool:
     """Determine if a document_class is a RawBSONDocument class."""
     marker = getattr(document_class, "_type_marker", None)
     return marker == _RAW_BSON_DOCUMENT_MARKER
+
+
+_DOCUMENT_TYPES = ("dict", "raw")
+
+#: Accepted values for the ``document_type`` option.
+_DocumentTypeName = Literal["dict", "raw"]
+
+
+def _document_class_for(document_type: _DocumentTypeName) -> Any:
+    """Resolve a ``document_type`` name to its document class."""
+    if not isinstance(document_type, str):
+        raise TypeError(f"document_type must be a string, not {type(document_type).__name__}")
+    if document_type == "dict":
+        return dict
+    if document_type == "raw":
+        from bson.raw_bson import RawBSONDocument
+
+        return RawBSONDocument
+    raise ValueError(f"document_type must be one of {_DOCUMENT_TYPES}, not {document_type!r}")
 
 
 class TypeEncoder(abc.ABC):
@@ -263,6 +283,7 @@ if TYPE_CHECKING:
             tzinfo: Optional[datetime.tzinfo] = ...,
             type_registry: Optional[TypeRegistry] = ...,
             datetime_conversion: Optional[int] = ...,
+            document_type: Optional[_DocumentTypeName] = ...,
         ) -> CodecOptions[_DocumentType]: ...
 
         # CodecOptions API
@@ -291,8 +312,8 @@ else:
 
             The `document_class` option is used to define a custom type for use
             decoding BSON documents. Access to the underlying raw BSON bytes for
-            a document is available using the :class:`~bson.raw_bson.RawBSONDocument`
-            type::
+            a document is available using the
+            :class:`~bson.raw_bson.RawBSONDocument` type::
 
               >>> from bson.raw_bson import RawBSONDocument
               >>> from bson.codec_options import CodecOptions
@@ -326,7 +347,23 @@ else:
 
             :param document_class: BSON documents returned in queries will be decoded
                 to an instance of this class. Must be a subclass of
-                :class:`~collections.abc.MutableMapping`. Defaults to :class:`dict`.
+                :class:`~collections.abc.MutableMapping`. Defaults to
+                :class:`dict`.
+            :param document_type: Shorthand for ``document_class``, one of:
+
+                - ``"dict"`` (:class:`dict`): decode every value immediately.
+                  Fastest when most fields are read, and keeps no raw bytes.
+                  This is the default.
+                - ``"raw"`` (:class:`~bson.raw_bson.RawBSONDocument`): a
+                  read-only mapping that decodes nothing until it is accessed.
+                  Use it to pass documents through without decoding. It does
+                  not support mutation or :func:`json.dumps`. Call
+                  :meth:`~bson.raw_bson.RawBSONDocument.to_dict` for a plain,
+                  mutable copy.
+
+                Mutually exclusive with ``document_class``.
+
+                .. versionadded:: 4.19
             :param tz_aware: If ``True``, BSON datetimes will be decoded to timezone
                 aware instances of :class:`~datetime.datetime`. Otherwise they will be
                 naive. Defaults to ``False``.
@@ -379,8 +416,14 @@ else:
             tzinfo: Optional[datetime.tzinfo] = None,
             type_registry: Optional[TypeRegistry] = None,
             datetime_conversion: Optional[DatetimeConversion] = DatetimeConversion.DATETIME,
+            document_type: Optional[_DocumentTypeName] = None,
         ) -> CodecOptions:
-            doc_class = document_class or dict
+            if document_type is not None:
+                if document_class is not None:
+                    raise TypeError("cannot specify both document_class and document_type")
+                doc_class = _document_class_for(document_type)
+            else:
+                doc_class = document_class or _DEFAULT_DOCUMENT_CLASS
             # Generic aliases like SON[str, Any] or dict[str, Any] aren't classes, so
             # resolve to their origin before the subclass check. Whether issubclass()
             # raises TypeError or just returns False for such aliases is inconsistent
@@ -437,9 +480,10 @@ else:
 
         def _arguments_repr(self) -> str:
             """Representation of the arguments used to create this object."""
-            document_class_repr = (
-                "dict" if self.document_class is dict else repr(self.document_class)
-            )
+            if self.document_class is dict:
+                document_class_repr = "dict"
+            else:
+                document_class_repr = repr(self.document_class)
 
             uuid_rep_repr = UUID_REPRESENTATION_NAMES.get(
                 self.uuid_representation, self.uuid_representation
@@ -467,11 +511,15 @@ else:
             .. versionadded:: 3.5
             """
             opts = self._asdict()
+            if "document_type" in kwargs:
+                opts.pop("document_class", None)
             opts.update(kwargs)
             return CodecOptions(**opts)
 
 
-DEFAULT_CODEC_OPTIONS: CodecOptions[dict[str, Any]] = CodecOptions()
+_DEFAULT_DOCUMENT_CLASS = dict
+
+DEFAULT_CODEC_OPTIONS: CodecOptions[Any] = CodecOptions(document_class=_DEFAULT_DOCUMENT_CLASS)
 
 
 def _parse_codec_options(options: Any) -> CodecOptions[Any]:

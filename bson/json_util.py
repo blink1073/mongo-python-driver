@@ -312,6 +312,9 @@ class JSONOptions(_BASE_CLASS):
         **kwargs: Any,
     ) -> JSONOptions:
         kwargs["tz_aware"] = kwargs.get("tz_aware", False)
+        # JSON parsing constructs the document class from key/value pairs, so
+        # the default stays dict rather than any raw document class.
+        kwargs.setdefault("document_class", dict)
         if kwargs["tz_aware"]:
             kwargs["tzinfo"] = kwargs.get("tzinfo", utc)
         if datetime_representation not in (

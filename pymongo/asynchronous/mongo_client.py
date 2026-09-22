@@ -53,7 +53,13 @@ from typing import (
     cast,
 )
 
-from bson.codec_options import DEFAULT_CODEC_OPTIONS, CodecOptions, TypeRegistry
+from bson.codec_options import (
+    DEFAULT_CODEC_OPTIONS,
+    CodecOptions,
+    TypeRegistry,
+    _document_class_for,
+    _DocumentTypeName,
+)
 from bson.timestamp import Timestamp
 from pymongo import _csot, _op_id, common, helpers_shared, periodic_executor
 from pymongo._telemetry import _generate_op_id_or_none, log_command_retry
@@ -180,6 +186,7 @@ class AsyncMongoClient(common.BaseObject, Generic[_DocumentType]):
         tz_aware: Optional[bool] = None,
         connect: Optional[bool] = None,
         type_registry: Optional[TypeRegistry] = None,
+        document_type: Optional[_DocumentTypeName] = None,
         **kwargs: Any,
     ) -> None:
         """Client for a MongoDB instance, a replica set, or a set of mongoses.
@@ -279,6 +286,12 @@ class AsyncMongoClient(common.BaseObject, Generic[_DocumentType]):
         :param port: port number on which to connect
         :param document_class: default class to use for
             documents returned from queries on this client
+        :param document_type: shorthand for ``document_class``: ``"dict"``
+            (:class:`dict`) or ``"raw"``
+            (:class:`~bson.raw_bson.RawBSONDocument`, read-only). See
+            :class:`~bson.codec_options.CodecOptions` for the tradeoffs.
+
+            .. versionadded:: 4.19
         :param tz_aware: if ``True``,
             :class:`~datetime.datetime` instances returned as values
             in a document by this :class:`AsyncMongoClient` will be timezone
@@ -776,6 +789,10 @@ class AsyncMongoClient(common.BaseObject, Generic[_DocumentType]):
             The default value of ``connect`` is changed to ``False`` when running in a
             Function-as-a-service environment.
         """
+        if document_type is not None:
+            if document_class is not None:
+                raise TypeError("cannot specify both document_class and document_type")
+            document_class = _document_class_for(document_type)
         doc_class = document_class or dict
         self._init_kwargs: dict[str, Any] = {
             "host": host,

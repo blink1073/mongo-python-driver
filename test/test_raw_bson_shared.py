@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import datetime
 import gc
 import pickle
 import sys
@@ -319,6 +320,106 @@ class TestRawBSONDocument(UnitTest):
 
         self.assertEqual(decode(encode(doc)), {"value": DBRef("test", "id")})
         self.assertEqual(doc["value"].raw, raw_encoded)
+
+    def test_keys_without_inflating_values(self):
+        doc = RawBSONDocument(encode({"a": 1, "b": {"c": 2}, "d": [1, 2]}))
+        self.assertEqual([], list(RawBSONDocument(encode({}))))
+        self.assertEqual(["a", "b", "d"], list(doc.keys()))
+        self.assertEqual(3, len(doc))
+        self.assertIn("b", doc)
+        self.assertNotIn("missing", doc)
+        # Reading keys, length, and membership does not decode any values.
+        self.assertIsNone(doc._RawBSONDocument__inflated_doc)
+
+    def test_keys_match_values_after_inflate(self):
+        doc = RawBSONDocument(self.bson_string)
+        self.assertEqual(["_id", "name", "addresses"], list(doc))
+        self.assertEqual("Sherlock", doc["name"])
+        self.assertEqual(["_id", "name", "addresses"], list(doc))
+
+    def test_keys_detect_invalid_element_type(self):
+        invalid_type = bytearray(encode({"a": 1}))
+        invalid_type[4] = 0x14  # Not a valid BSON type marker.
+        doc = RawBSONDocument(bytes(invalid_type))
+        with self.assertRaisesRegex(InvalidBSON, "Detected unknown BSON type"):
+            list(doc)
+
+    def test_keys_detect_misaligned_elements(self):
+        misaligned = b"\x0d\x00\x00\x00\x10a\x00\x01\x00\x00\x00\x05\x00"
+        doc = RawBSONDocument(misaligned)
+        with self.assertRaisesRegex(InvalidBSON, "bad object or element length"):
+            list(doc)
+
+    def test_keys_survive_pickle_and_deepcopy(self):
+        for duplicate in (
+            pickle.loads(pickle.dumps(self.document)),
+            copy.deepcopy(self.document),
+        ):
+            self.assertEqual(["_id", "name", "addresses"], list(duplicate))
+
+    def test_to_dict_is_deep_and_plain(self):
+        doc = RawBSONDocument(
+            encode({"a": 1, "sub": {"x": 2}, "arr": [{"y": 3}, 4], "nested": [[{"z": 5}]]})
+        )
+        result = doc.to_dict()
+        self.assertIs(type(result), dict)
+        self.assertEqual(
+            {"a": 1, "sub": {"x": 2}, "arr": [{"y": 3}, 4], "nested": [[{"z": 5}]]},
+            result,
+        )
+        self.assertIs(type(result["sub"]), dict)
+        self.assertIs(type(result["arr"][0]), dict)
+        self.assertIs(type(result["nested"][0][0]), dict)
+        # The copy is independent of the source.
+        result["sub"]["x"] = 99
+        self.assertEqual(2, doc["sub"]["x"])
+
+    def test_to_dict_preserves_codec_options(self):
+        aware = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+        opts = CodecOptions(tz_aware=True, document_class=RawBSONDocument)
+        doc = RawBSONDocument(encode({"dt": aware}), codec_options=opts)
+        self.assertEqual(aware, doc.to_dict()["dt"])
+
+    def test_to_dict_of_subclass(self):
+        doc = _TaggedRawBSONDocument(encode({"a": {"b": 1}}), "tag")
+        self.assertEqual({"a": {"b": 1}}, doc.to_dict())
+
+    def test_buffer_released_for_scalar_only_document(self):
+        raw = encode({"a": 1, "s": "x" * 100})
+        doc = RawBSONDocument(raw)
+        self.assertTrue(doc._RawBSONDocument__buffer)
+        self.assertEqual(1, doc["a"])
+        # No child needs the buffer, so it is released and raw re-encodes.
+        self.assertFalse(doc._RawBSONDocument__buffer)
+        self.assertEqual(raw, doc.raw)
+        self.assertEqual(raw, encode(doc))
+
+    def test_buffer_kept_when_child_needs_it(self):
+        raw = encode({"a": 1, "sub": {"b": 2}})
+        doc = RawBSONDocument(raw)
+        self.assertEqual(1, doc["a"])
+        self.assertTrue(doc._RawBSONDocument__buffer)
+        self.assertTrue(doc["sub"]._RawBSONDocument__buffer)
+        self.assertEqual(raw, doc.raw)
+
+    def test_to_dict_after_buffer_released(self):
+        raw = encode({"a": 1, "s": "x" * 100})
+        doc = RawBSONDocument(raw)
+        doc["a"]
+        self.assertFalse(doc._RawBSONDocument__buffer)
+        self.assertEqual({"a": 1, "s": "x" * 100}, doc.to_dict())
+
+    def test_array_document_keeps_buffer(self):
+        # Arrays stay as raw bytes for _RawArrayBSONDocument, so the buffer
+        # must not be released.
+        from bson.raw_bson import _RawArrayBSONDocument
+
+        raw = encode({"arr": [1, 2, 3]})
+        doc = _RawArrayBSONDocument(raw)
+        self.assertEqual(raw, doc.raw)
+        # Arrays stay raw (bytes in C, memoryview in pure Python).
+        self.assertNotIsInstance(doc["arr"], list)
+        self.assertEqual(raw, doc.raw)
 
 
 if __name__ == "__main__":

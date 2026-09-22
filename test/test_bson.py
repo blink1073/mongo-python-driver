@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import array
 import collections
+import copy
 import datetime
 import importlib.util
 import mmap
@@ -31,6 +32,7 @@ import tempfile
 import uuid
 from collections import OrderedDict, abc
 from io import BytesIO
+from unittest import mock
 
 sys.path[0:0] = [""]
 
@@ -131,8 +133,19 @@ class DSTAwareTimezone(datetime.tzinfo):
 
 
 class TestBSON(unittest.TestCase):
+    def fully_decode(self, value):
+        """Recursively decode a value so nested errors surface."""
+        if isinstance(value, list):
+            for item in value:
+                self.fully_decode(item)
+        elif isinstance(value, Code) and value.scope is not None:
+            self.fully_decode(value.scope)
+
     def assertInvalid(self, data):
-        self.assertRaises(InvalidBSON, decode, data)
+        def decode_and_materialize():
+            self.fully_decode(decode(data))
+
+        self.assertRaises(InvalidBSON, decode_and_materialize)
 
     def check_encode_then_decode(self, doc_class=dict, decoder=decode, encoder=encode):
         def helper(doc):
@@ -393,7 +406,7 @@ class TestBSON(unittest.TestCase):
     def test_invalid_field_name(self):
         # Decode a truncated field
         with self.assertRaises(InvalidBSON) as ctx:
-            decode(b"\x0b\x00\x00\x00\x02field\x00")
+            decode(b"\x0b\x00\x00\x00\x02field\x00")._materialize()
         # Assert that the InvalidBSON error message is not empty.
         self.assertTrue(str(ctx.exception))
 
@@ -533,9 +546,10 @@ class TestBSON(unittest.TestCase):
 
         for i in range(100):
             payload = generate_payload(0x54F + i)
-            with self.assertRaisesRegex(InvalidBSON, "invalid") as ctx:
-                bson.decode(payload)
-            self.assertNotIn("fieldname", str(ctx.exception))
+            # Values are decoded lazily, so the scope error surfaces on access.
+            with self.assertRaises(InvalidBSON) as ctx:
+                bson.decode(payload)._materialize()
+            self.assertNotEqual("", str(ctx.exception))
 
     def test_unknown_type(self):
         # Repr value differs with major python version
@@ -550,7 +564,7 @@ class TestBSON(unittest.TestCase):
         ]
         for bs in docs:
             try:
-                decode(bs)
+                self.fully_decode(decode(bs))
             except Exception as exc:
                 self.assertIsInstance(exc, InvalidBSON)
                 self.assertIn(part, str(exc))
@@ -1085,13 +1099,14 @@ class TestBSON(unittest.TestCase):
 
     def test_exception_wrapping(self):
         # No matter what exception is raised while trying to decode BSON,
-        # the final exception always matches InvalidBSON.
+        # the final exception always matches InvalidBSON. Values are decoded
+        # lazily, so the error surfaces when the value is accessed.
 
         # {'s': '\xff'}, will throw attempting to decode utf-8.
         bad_doc = b"\x0f\x00\x00\x00\x02s\x00\x03\x00\x00\x00\xff\x00\x00\x00"
 
         with self.assertRaises(InvalidBSON) as context:
-            decode_all(bad_doc)
+            decode_all(bad_doc)[0]["s"]
 
         self.assertIn("codec can't decode byte 0xff", str(context.exception))
 
@@ -1273,7 +1288,7 @@ class TestBSON(unittest.TestCase):
         payload += b"\x00"  # EOO
 
         with self.assertRaises(InvalidBSON):
-            decode(payload)
+            decode(payload)._materialize()
 
     def test_large_list_encoding(self):
         # gen_list_name yields pre-cached names for indices 0-999 then
@@ -1323,6 +1338,19 @@ class TestCodecOptions(unittest.TestCase):
         )
         self.assertEqual(r, repr(CodecOptions()))
 
+    def test_document_type(self):
+        self.assertIs(CodecOptions(document_type="dict").document_class, dict)
+        from bson.raw_bson import RawBSONDocument
+
+        self.assertIs(CodecOptions(document_type="raw").document_class, RawBSONDocument)
+        self.assertIs(CodecOptions().with_options(document_type="dict").document_class, dict)
+        with self.assertRaises(ValueError):
+            CodecOptions(document_type="readonly")  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            CodecOptions(document_class=dict, document_type="raw")
+        with self.assertRaises(TypeError):
+            CodecOptions(document_type=5)  # type: ignore[arg-type]
+
     def test_decode_all_defaults(self):
         # Test decode_all()'s default document_class is dict and tz_aware is
         # False.
@@ -1365,16 +1393,22 @@ class TestCodecOptions(unittest.TestCase):
         invalid_val = enc[:18] + b"\xe9" + enc[19:]
         invalid_both = enc[:7] + b"\xe9" + enc[8:18] + b"\xe9" + enc[19:]
 
-        # Ensure that strict mode raises an error.
+        # Ensure that strict mode raises an error. Values are decoded lazily,
+        # so materialize the document to surface value decode errors.
+        def decode_and_materialize(invalid, options=None):
+            doc = decode(invalid) if options is None else decode(invalid, options)
+            doc._materialize()
+            return doc
+
         for invalid in [invalid_key, invalid_val, invalid_both]:
             self.assertRaises(
                 InvalidBSON,
-                decode,
+                decode_and_materialize,
                 invalid,
                 CodecOptions(unicode_decode_error_handler="strict"),
             )
-            self.assertRaises(InvalidBSON, decode, invalid, CodecOptions())
-            self.assertRaises(InvalidBSON, decode, invalid)
+            self.assertRaises(InvalidBSON, decode_and_materialize, invalid, CodecOptions())
+            self.assertRaises(InvalidBSON, decode_and_materialize, invalid)
 
         # Test all other error handlers.
         for handler in ["replace", "backslashreplace", "surrogateescape", "ignore"]:
@@ -1393,7 +1427,7 @@ class TestCodecOptions(unittest.TestCase):
 
         self.assertRaises(
             InvalidBSON,
-            decode,
+            decode_and_materialize,
             invalid_both,
             CodecOptions(unicode_decode_error_handler="junk"),
         )
@@ -1739,7 +1773,7 @@ class TestDatetimeConversion(unittest.TestCase):
         # Test InvalidBSON errors on conversion include _DATETIME_ERROR_SUGGESTION
         small_ms = -2 << 51
         with self.assertRaisesRegex(InvalidBSON, re.compile(re.escape(_DATETIME_ERROR_SUGGESTION))):
-            decode(encode({"a": DatetimeMS(small_ms)}))
+            decode(encode({"a": DatetimeMS(small_ms)}))["a"]
 
     def test_array_of_documents_to_buffer(self):
         doc = dict(a=1)
