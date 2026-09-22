@@ -56,6 +56,10 @@ case "$SANITIZER" in
     uv pip install --python "$VENV_PYTHON" -r requirements/test.txt
 
     PYTEST_CMD=(env "LD_PRELOAD=$RUNTIME_LIB" "$VENV_PYTHON" -m pytest)
+
+    # The C-specific tests skip silently when the extensions are missing,
+    # which would turn a broken rebuild into a false-green task.
+    env "LD_PRELOAD=$RUNTIME_LIB" "$VENV_PYTHON" -c "import pymongo; assert pymongo.has_c(), 'C extensions are not importable'"
     ;;
   tsan)
     rm -rf "$CPYTHON_SRC" "$CPYTHON_INSTALL"
@@ -146,6 +150,10 @@ case "$SANITIZER" in
     # No LD_PRELOAD: both the interpreter and the extensions link the TSan
     # runtime at build time.
     PYTEST_CMD=("$TSAN_PYTHON" -m pytest)
+
+    # The C-specific tests skip silently when the extensions are missing,
+    # which would turn a broken rebuild into a false-green task.
+    "$TSAN_PYTHON" -c "import pymongo; assert pymongo.has_c(), 'C extensions are not importable'"
     ;;
   *)
     echo "Unknown SANITIZER: $SANITIZER (expected 'asan' or 'tsan')" >&2
