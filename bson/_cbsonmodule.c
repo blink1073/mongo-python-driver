@@ -161,6 +161,15 @@ extern int cbson_long_long_to_str(long long num, char* str, size_t size) {
     return 0;
 }
 
+static PyObject* _test_fail_next_realloc(PyObject* self, PyObject* Py_UNUSED(ignored)) {
+#ifdef PYMONGO_TEST_ALLOC_FAILURE
+    pymongo_buffer_test_fail_next_realloc();
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+}
+
 static PyObject* _test_long_long_to_str(PyObject* self, PyObject* args) {
     // Test extreme values
     Py_ssize_t maxNum = PY_SSIZE_T_MAX;
@@ -3516,6 +3525,7 @@ static PyMethodDef _CBSONMethods[] = {
      "Decode all elements of a raw BSON document into a result mapping."},
     {"_array_of_documents_to_buffer", _cbson_array_of_documents_to_buffer, METH_VARARGS, "Convert raw array of documents to a stream of BSON documents"},
     {"_test_long_long_to_str", _test_long_long_to_str, METH_VARARGS, "Test conversion of extreme and common Py_ssize_t values to str."},
+    {"_test_fail_next_realloc", _test_fail_next_realloc, METH_NOARGS, "Test-only hook: fail the next buffer growth exactly once. Returns False if the hook is not compiled in."},
     {NULL, NULL, 0, NULL}
 };
 

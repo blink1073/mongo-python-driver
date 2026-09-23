@@ -1,0 +1,24 @@
+# PyMongo-specific ThreadSanitizer suppressions.
+#
+# .evergreen/scripts/run-sanitizer-tests.sh concatenates this file with the
+# pinned CPython tag's own Tools/tsan/suppressions_free_threading.txt and
+# passes the result as TSan's single suppressions= path. That upstream file
+# is not empty on the 3.14 branch: it carries roughly two dozen entries
+# (assign_version_tag, update_one_slot, _PyFrame_GetCode, rangeiter_next,
+# list_ass_slice_lock_held, PyObject_Realloc, mi_block_set_nextx,
+# pthread_create, and others) that CPython's own fully instrumented TSan CI
+# job needs to run clean. Do not duplicate those here.
+#
+# Add an entry below only for a race that has been investigated and judged
+# benign, with a comment saying why: either a race in PyMongo's own C
+# extensions, or a CPython-internal race (both stacks within CPython) that
+# upstream's own suppressions do not yet cover.
+#
+# Reference: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+
+# CPython-internal: under free-threading the GC's delete_garbage path
+# (memory_clear) and a worker thread's deferred refcount merge
+# (memory_dealloc) can both enter _memory_release for the same
+# memoryview. Both stacks are entirely within CPython; pymongo only
+# creates and releases the memoryviews concurrently.
+race_top:_memory_release

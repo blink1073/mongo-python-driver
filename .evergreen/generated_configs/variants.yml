@@ -520,6 +520,16 @@ buildvariants:
       SUB_TEST_NAME: pyopenssl
     tags: [pr]
 
+  # Sanitizer tests
+  - name: sanitizers-ubuntu-22
+    tasks:
+      - name: test-sanitizer-asan
+      - name: test-sanitizer-tsan
+    display_name: Sanitizers Ubuntu-22
+    run_on:
+      - ubuntu2204-small
+    tags: [pr]
+
   # Search index tests
   - name: search-index-helpers-rhel8
     tasks:
