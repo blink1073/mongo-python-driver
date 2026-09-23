@@ -48,4 +48,9 @@ buffer_position pymongo_buffer_get_position(buffer_t buffer);
 char* pymongo_buffer_get_buffer(buffer_t buffer);
 void pymongo_buffer_update_position(buffer_t buffer, buffer_position new_position);
 
+/* Test-only: enable a hook that makes the next buffer growth fail exactly
+ * once. Only functional when the extension is built with
+ * PYMONGO_TEST_ALLOC_FAILURE. */
+void pymongo_buffer_test_fail_next_realloc(void);
+
 #endif

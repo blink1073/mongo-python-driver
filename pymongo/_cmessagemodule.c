@@ -922,6 +922,15 @@ fail:
     return result;
 }
 
+static PyObject* _test_fail_next_realloc(PyObject* self, PyObject* Py_UNUSED(ignored)) {
+#ifdef PYMONGO_TEST_ALLOC_FAILURE
+    pymongo_buffer_test_fail_next_realloc();
+    Py_RETURN_TRUE;
+#else
+    Py_RETURN_FALSE;
+#endif
+}
+
 static PyMethodDef _CMessageMethods[] = {
     {"_query_message", _cbson_query_message, METH_VARARGS,
      "create a query message to be sent to MongoDB"},
@@ -935,6 +944,8 @@ static PyMethodDef _CMessageMethods[] = {
      "Create the next batched insert, update, or delete using OP_MSG"},
     {"_encode_batched_op_msg", _cbson_encode_batched_op_msg, METH_VARARGS,
      "Encode the next batched insert, update, or delete using OP_MSG"},
+    {"_test_fail_next_realloc", _test_fail_next_realloc, METH_NOARGS,
+     "Test-only hook: fail the next buffer growth exactly once. Returns False if the hook is not compiled in."},
     {NULL, NULL, 0, NULL}
 };
 

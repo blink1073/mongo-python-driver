@@ -14,7 +14,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 SANITIZER=${SANITIZER:?"SANITIZER must be set to 'asan' or 'tsan'"}
 UV_PYTHON=${UV_PYTHON:-3.13}
-TEST_FILES=(test/test_bson.py test/test_raw_bson.py test/test_raw_bson_shared.py test/test_client.py)
+TEST_FILES=(test/test_bson.py test/test_message.py test/test_raw_bson.py test/test_raw_bson_shared.py test/test_client.py)
 
 # The free-threaded CPython the TSan task builds. Kept in step with the
 # "3.14t" entry in .evergreen/scripts/generate_config_utils.py's CPYTHONS.
@@ -34,7 +34,9 @@ export PYMONGO_C_EXT_MUST_BUILD=1
 case "$SANITIZER" in
   asan)
     rm -rf .sanitizer-venv
-    export CFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g -O0"
+    # PYMONGO_TEST_ALLOC_FAILURE compiles the test-only fail-once realloc
+    # hook (bson/buffer.c) so the realloc-failure regression tests run.
+    export CFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g -O0 -DPYMONGO_TEST_ALLOC_FAILURE"
     export LDFLAGS="-fsanitize=address,undefined"
 
     # clang's ASan runtime also provides the UBSan handlers, so preloading

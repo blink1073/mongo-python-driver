@@ -25,6 +25,17 @@
 
 #define INITIAL_BUFFER_SIZE 256
 
+#ifdef PYMONGO_TEST_ALLOC_FAILURE
+/* Test-only hook: when enabled, the next buffer_grow call fails exactly
+ * once, deterministically reproducing a realloc failure (including the
+ * free of the old block, the NULL buffer pointer, and the stale size). */
+static int _test_fail_next_realloc = 0;
+
+void pymongo_buffer_test_fail_next_realloc(void) {
+    _test_fail_next_realloc = 1;
+}
+#endif
+
 struct buffer {
     char* buffer;
     int size;
@@ -91,6 +102,16 @@ static int buffer_grow(buffer_t buffer, int min_length) {
            size = min_length;
         }
     }
+#ifdef PYMONGO_TEST_ALLOC_FAILURE
+    if (_test_fail_next_realloc) {
+        _test_fail_next_realloc = 0;
+        /* Replicate the realloc failure path exactly. */
+        free(old_buffer);
+        buffer->buffer = NULL;
+        set_memory_error();
+        return 1;
+    }
+#endif
     buffer->buffer = (char*)realloc(buffer->buffer, sizeof(char) * size);
     if (buffer->buffer == NULL) {
         free(old_buffer);
