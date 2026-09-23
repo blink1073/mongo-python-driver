@@ -36,7 +36,30 @@ case "$SANITIZER" in
     rm -rf .sanitizer-venv
     export CFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g -O0"
     export LDFLAGS="-fsanitize=address,undefined"
-    RUNTIME_LIB=$("$CC" -print-file-name=libasan.so)
+
+    # clang's ASan runtime also provides the UBSan handlers, so preloading
+    # libasan alone resolves the symbols from both -fsanitize=address and
+    # -fsanitize=undefined. Preloading a separate libubsan_standalone aborts
+    # during init: the two runtimes both bring sanitizer_common and fight
+    # over sigaction. clang names the runtime libclang_rt.asan-x86_64.so, and
+    # -print-file-name can also return a bare name or a linker script, which
+    # ld.so refuses to preload, so resolve the candidates and require a real
+    # ELF shared object.
+    resolve_runtime() {
+      local name path
+      for name in "$@"; do
+        path=$("$CC" -print-file-name="$name")
+        if [ -f "$path" ] && [ "$(head -c 4 "$path" | od -An -tx1 | tr -d " \n")" = "7f454c46" ]; then
+          printf "%s\n" "$path"
+          return 0
+        fi
+      done
+      return 1
+    }
+    RUNTIME_LIB=$(resolve_runtime libclang_rt.asan-x86_64.so libasan.so) || {
+      echo "Could not locate a loadable ASan runtime through $CC -print-file-name. Is the matching sanitizer runtime package installed?" >&2
+      exit 1
+    }
     export ASAN_OPTIONS="detect_leaks=0"
     export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
     # Route CPython's own allocations through the system allocator so ASan's
@@ -44,11 +67,6 @@ case "$SANITIZER" in
     # noise. The free-threaded TSan interpreter doesn't accept this value,
     # so it's scoped to ASan only.
     export PYTHONMALLOC=malloc
-
-    if [ ! -f "$RUNTIME_LIB" ]; then
-      echo "Could not locate the $SANITIZER runtime library (got: $RUNTIME_LIB). Is the matching sanitizer runtime package installed?" >&2
-      exit 1
-    fi
 
     uv venv --python "$UV_PYTHON" .sanitizer-venv
     VENV_PYTHON=.sanitizer-venv/bin/python3
@@ -58,8 +76,9 @@ case "$SANITIZER" in
     PYTEST_CMD=(env "LD_PRELOAD=$RUNTIME_LIB" "$VENV_PYTHON" -m pytest)
 
     # The C-specific tests skip silently when the extensions are missing,
-    # which would turn a broken rebuild into a false-green task.
-    env "LD_PRELOAD=$RUNTIME_LIB" "$VENV_PYTHON" -c "import pymongo; assert pymongo.has_c(), 'C extensions are not importable'"
+    # which would turn a broken rebuild into a false-green task. Import the
+    # extension modules directly so a failure shows the real ImportError.
+    env "LD_PRELOAD=$RUNTIME_LIB" "$VENV_PYTHON" -c "import bson._cbson, pymongo._cmessage"
     ;;
   tsan)
     rm -rf "$CPYTHON_SRC" "$CPYTHON_INSTALL"
@@ -152,8 +171,9 @@ case "$SANITIZER" in
     PYTEST_CMD=("$TSAN_PYTHON" -m pytest)
 
     # The C-specific tests skip silently when the extensions are missing,
-    # which would turn a broken rebuild into a false-green task.
-    "$TSAN_PYTHON" -c "import pymongo; assert pymongo.has_c(), 'C extensions are not importable'"
+    # which would turn a broken rebuild into a false-green task. Import the
+    # extension modules directly so a failure shows the real ImportError.
+    "$TSAN_PYTHON" -c "import bson._cbson, pymongo._cmessage"
     ;;
   *)
     echo "Unknown SANITIZER: $SANITIZER (expected 'asan' or 'tsan')" >&2
