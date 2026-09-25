@@ -392,7 +392,8 @@ git add drivers-evergreen-tools
 ### Evergreen patches that need tools changes
 
 Point the submodule at the needed commit and commit the new gitlink in the patch branch;
-`configure-env.sh` checks out the recorded SHA on Evergreen hosts.
+`configure-env.sh` checks out the recorded SHA on Evergreen hosts (`setup-dev-env.sh` does
+the same for local checkouts with `just install`).
 
 ### Using a local checkout instead
 
