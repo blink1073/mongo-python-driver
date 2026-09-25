@@ -9,7 +9,6 @@ build/
 doc/_build/
 dist/
 tools/settings.py
-drivers-evergreen-tools
 pymongo.egg-info/
 *.so
 *.egg*
