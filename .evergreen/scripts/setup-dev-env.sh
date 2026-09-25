@@ -53,6 +53,16 @@ if [ "${CI:-}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
     printf 'export PATH="%s:$PATH"\n' "$PYMONGO_BIN_DIR_POSIX" >> "$_rc"
 fi
 
+# Initialize the drivers-evergreen-tools submodule before
+# install-dependencies.sh (which sources ensure-uv.sh from the tools
+# checkout). Evergreen's git.get_project does not init submodules, so this
+# must happen in our scripts. Tolerate non-git contexts (containers) with a
+# warning rather than a hard failure.
+if ! git -C "$ROOT" submodule update --init --recursive; then
+  echo "WARNING: could not initialize the drivers-evergreen-tools submodule;" \
+    "set DRIVERS_TOOLS to a drivers-evergreen-tools checkout instead."
+fi
+
 # Ensure dependencies are installed.
 bash $HERE/install-dependencies.sh
 

@@ -205,7 +205,7 @@ the pages will re-render and the browser will automatically refresh.
     project `uv` command (e.g. `just test`) runs with a different `uv` version, `uv` fails fast and tells you how to update.
 -   Ensure you have started the appropriate Mongo Server(s).  You can run `just run-server` with optional args
     to set up the server.  All given options will be passed to
-    [`run-mongodb.sh`](https://github.com/mongodb-labs/drivers-evergreen-tools/blob/master/.evergreen/run-mongodb.sh).  Run `$DRIVERS_TOOLS/.evergreen/run-mongodb.sh start -h`
+    [`run-mongodb.sh`](https://github.com/mongodb-labs/drivers-evergreen-tools/blob/master/.evergreen/run-mongodb.sh).  Run `drivers-evergreen-tools/.evergreen/run-mongodb.sh start -h`
     for a full list of options.
 -   Run `just test` or `pytest` to run all of the tests.
 -   Append `test/<mod_name>.py::<class_name>::<test_name>` to run
@@ -220,10 +220,10 @@ the pages will re-render and the browser will automatically refresh.
 
 ### Prerequisites
 
-- Clone `drivers-evergreen-tools`:
-    `git clone git@github.com:mongodb-labs/drivers-evergreen-tools.git`.
-- Run `export DRIVERS_TOOLS=$PWD/drivers-evergreen-tools`.  This can be put into a `.bashrc` file
-  for convenience.
+- The `drivers-evergreen-tools` submodule (see
+  [The drivers-evergreen-tools submodule](#the-drivers-evergreen-tools-submodule)).
+  `just install` initializes it; no manual clone or `export DRIVERS_TOOLS` is needed.
+  `DRIVERS_TOOLS` remains an optional override for an existing local checkout.
 - Some tests require access to [Drivers test secrets](https://github.com/mongodb-labs/drivers-evergreen-tools/tree/master/.evergreen/secrets_handling#secrets-handling).
 
 ### Usage
@@ -356,7 +356,7 @@ You will need to set up access to the `drivers-test-secrets-role`, see the [Wiki
 ### OCSP tests
 
 - Export the orchestration file, e.g. `export ORCHESTRATION_FILE=rsa-basic-tls-ocsp-disableStapling.json`.
-This corresponds to a config file in `$DRIVERS_TOOLS/.evergreen/orchestration/configs/servers`.
+This corresponds to a config file in `drivers-evergreen-tools/.evergreen/orchestration/configs/servers`.
 MongoDB servers on MacOS and Windows do not staple OCSP responses and only support RSA.
 NOTE: because the mock ocsp responder MUST be started prior to the server starting, the ocsp tests start the server
 as part of `setup-tests`.
@@ -371,6 +371,43 @@ If you are running one of the `no-responder` tests, omit the `run-server` step.
 - Start the appropriate server, e.g. `just run-server --version=v8.0-perf --ssl`.
 - Set up the tests with `sync` or `async`: `just setup-tests perf sync`.
 - Run the tests: `just run-tests`.
+
+## The drivers-evergreen-tools submodule
+
+The `drivers-evergreen-tools` repository is consumed as a git submodule at the repo root,
+pinned to a specific commit. Dependabot bumps the pin weekly.
+
+### Daily flow
+
+Nothing to do: `just install` initializes the submodule, and Dependabot keeps it fresh.
+
+### Manually bumping the submodule
+
+```bash
+git -C drivers-evergreen-tools fetch --tags
+git -C drivers-evergreen-tools checkout vX.Y.Z
+git add drivers-evergreen-tools
+```
+
+### Evergreen patches that need tools changes
+
+Point the submodule at the needed commit and commit the new gitlink in the patch branch;
+`configure-env.sh` checks out the recorded SHA on Evergreen hosts.
+
+### Using a local checkout instead
+
+Set `DRIVERS_TOOLS` to the path of a local clone — the environment variable wins over the
+submodule default:
+
+```bash
+export DRIVERS_TOOLS=/path/to/drivers-evergreen-tools
+```
+
+Alternatively, keep a local pin from being reset by `git submodule update`:
+
+```bash
+git config submodule.drivers-evergreen-tools.update none
+```
 
 ## Enable Debug Logs
 

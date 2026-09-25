@@ -10,5 +10,7 @@ if [ -f $HERE/env.sh ]; then
   source $HERE/env.sh
 fi
 
-rm -rf "${DRIVERS_TOOLS}" || true
+# DRIVERS_TOOLS now points inside the checkout (the drivers-evergreen-tools
+# submodule); deleting it would corrupt the workdir for later tasks on the
+# same host, so it is intentionally not removed here.
 rm -f $HERE/../../secrets-export.sh || true

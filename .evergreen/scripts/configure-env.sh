@@ -12,7 +12,7 @@ else
 fi
 
 PROJECT_DIRECTORY="$(pwd)"
-DRIVERS_TOOLS="$(dirname $PROJECT_DIRECTORY)/drivers-tools"
+DRIVERS_TOOLS="$PROJECT_DIRECTORY/drivers-evergreen-tools"
 CARGO_HOME=${CARGO_HOME:-${DRIVERS_TOOLS}/.cargo}
 DRIVERS_TOOLS_BINARIES="$DRIVERS_TOOLS/.bin"
 MONGODB_BINARIES="$DRIVERS_TOOLS/mongodb/bin"
@@ -93,12 +93,12 @@ export PROJECT="${project:-mongo-python-driver}"
 export PIP_QUIET=1
 EOT
 
-# Write the .env file for drivers-tools.
-rm -rf $DRIVERS_TOOLS
-BRANCH=master
-ORG=mongodb-labs
-git clone --branch $BRANCH https://github.com/$ORG/drivers-evergreen-tools.git $DRIVERS_TOOLS
+# Initialize the drivers-evergreen-tools submodule (Evergreen's
+# git.get_project does not init submodules). Checks out the gitlink recorded
+# in this checkout.
+git -C "$PROJECT_DIRECTORY" submodule update --init --recursive
 
+# Write the .env file for drivers-tools.
 cat <<EOT > ${DRIVERS_TOOLS}/.env
 SKIP_LEGACY_SHELL=1
 DRIVERS_TOOLS="$DRIVERS_TOOLS"
