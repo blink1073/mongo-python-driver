@@ -457,6 +457,8 @@ wheels (CPython 3.12-3.14).
 - Time-boxed fuzzing (runs daily on Evergreen): `just setup-tests fuzz fuzz`
   then `just run-tests`.  Set `FUZZ_MAX_TIME` (seconds, default 300) to change
   the per-target budget.
+- Nightly fuzzing harvests coverage-increasing inputs into `fuzz/corpus/`
+  via an automated PR (PYTHON-6178); see [fuzz/README.md](fuzz/README.md).
 
 ## Testing time-dependent operations
 
@@ -499,6 +501,20 @@ CPython version whose toolchain dir exists, `UV_PYTHON_SEARCH_PATH` points uv at
   re-bind them rather than reshuffle the set. Check the regenerated `generated_configs/tasks.yml`
   diff to confirm the `pr` tags.
 - Make sure to add instructions for running the test suite to `CONTRIBUTING.md`.
+
+### Sanitizer tests
+
+The `sanitizer` test suite (PYTHON-6048) builds the C extensions with
+`-fsanitize=address,undefined` against the toolchain's ASan/UBSan-instrumented
+CPython (`SANITIZER_PYTHON` in `.evergreen/scripts/utils.py`) and runs the
+files listed in `SANITIZER_FILES` in `.evergreen/scripts/setup_tests.py`. The
+toolchain interpreter initializes the sanitizer runtimes itself. It runs on
+PRs via the "Sanitizer RHEL8" variant. To run it on a Linux host with the
+toolchain:
+
+    just run-server
+    just setup-tests sanitizer
+    just run-tests
 
 ## Handling flaky tests
 
@@ -573,10 +589,10 @@ git diff HEAD~1 path/to/file >> .evergreen/spec-patch/PYTHON-1234.patch
 ```
 
 #### Running Locally
-Both `resync-all-specs.sh` and `resync-all-specs.py` can be run locally (and won't generate a PR).
+Both `resync-all-specs.sh` and `resync_all_specs.py` can be run locally (and won't generate a PR).
 ```bash
 ./.evergreen/scripts/resync-all-specs.sh
-python3 ./.evergreen/scripts/resync-all-specs.py
+python3 ./.evergreen/scripts/resync_all_specs.py
 ```
 
 ## Making a Release

@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import sys
 import warnings
-from collections.abc import Iterable
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 from pymongo.errors import ProtocolError
 from pymongo.hello import HelloCompat
 from pymongo.helpers_shared import _SENSITIVE_COMMANDS
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _SUPPORTED_COMPRESSORS = {"snappy", "zlib", "zstd"}
 _NO_COMPRESSION = {HelloCompat.CMD, HelloCompat.LEGACY_CMD}
@@ -57,7 +59,7 @@ def _have_zstd() -> bool:
         return False
 
 
-def validate_compressors(dummy: Any, value: Union[str, Iterable[str]]) -> list[str]:
+def validate_compressors(dummy: Any, value: str | Iterable[str]) -> list[str]:
     try:
         # `value` is string.
         compressors = value.split(",")  # type: ignore[union-attr]
@@ -116,8 +118,8 @@ class CompressionSettings:
         self.zlib_compression_level = zlib_compression_level
 
     def get_compression_context(
-        self, compressors: Optional[list[str]]
-    ) -> Union[SnappyContext, ZlibContext, ZstdContext, None]:
+        self, compressors: list[str] | None
+    ) -> SnappyContext | ZlibContext | ZstdContext | None:
         if compressors:
             chosen = compressors[0]
             if chosen == "snappy":

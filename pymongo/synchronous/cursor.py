@@ -17,13 +17,10 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
     NoReturn,
-    Optional,
-    Union,
     cast,
     overload,
 )
@@ -49,6 +46,8 @@ from pymongo.synchronous.helpers import next
 from pymongo.typings import _DocumentOut, _DocumentType
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from bson.codec_options import CodecOptions
     from pymongo.synchronous.collection import Collection
 
@@ -87,7 +86,7 @@ class Cursor(_AgnosticCursor[_DocumentType], _CursorBase[_DocumentType]):
     @overload
     def __getitem__(self, index: slice) -> Cursor[_DocumentType]: ...
 
-    def __getitem__(self, index: Union[int, slice]) -> Union[_DocumentType, Cursor[_DocumentType]]:
+    def __getitem__(self, index: int | slice) -> _DocumentType | Cursor[_DocumentType]:
         """Get a single document or a slice of documents from this cursor.
 
         .. warning:: A :class:`~Cursor` is not a Python :class:`list`. Each
@@ -219,7 +218,7 @@ class Cursor(_AgnosticCursor[_DocumentType], _CursorBase[_DocumentType]):
 
         return self._collection.distinct(key, session=self._session, **options)
 
-    def _send_message(self, operation: Union[_Query, _GetMore]) -> None:
+    def _send_message(self, operation: _Query | _GetMore) -> None:
         """Send a query or getmore operation and handles the response.
 
         If operation is ``None`` this is an exhaust cursor, which reads
@@ -385,7 +384,7 @@ class Cursor(_AgnosticCursor[_DocumentType], _CursorBase[_DocumentType]):
         else:
             raise StopIteration
 
-    def _next_batch(self, result: list, total: Optional[int] = None) -> bool:  # type: ignore[type-arg]
+    def _next_batch(self, result: list, total: int | None = None) -> bool:  # type: ignore[type-arg]
         """Get all or some documents from the cursor."""
         if self._empty:
             return False
@@ -430,9 +429,9 @@ class RawBatchCursor(Cursor[_DocumentType]):
     def _unpack_response(
         self,
         response: _OpMsg,
-        cursor_id: Optional[int],
+        cursor_id: int | None,
         codec_options: CodecOptions[Mapping[str, Any]],
-        user_fields: Optional[Mapping[str, Any]] = None,
+        user_fields: Mapping[str, Any] | None = None,
         legacy_response: bool = False,
     ) -> list[_DocumentOut]:
         raw_response = response.raw_response(cursor_id, user_fields=user_fields)
@@ -440,7 +439,7 @@ class RawBatchCursor(Cursor[_DocumentType]):
             # OP_MSG returns firstBatch/nextBatch documents as a BSON array
             # Re-assemble the array of documents into a document stream
             _convert_raw_document_lists_to_streams(raw_response[0])
-        return cast(list["_DocumentOut"], raw_response)
+        return cast("list[_DocumentOut]", raw_response)
 
     def explain(self) -> _DocumentType:
         """Returns an explain plan record for this cursor.

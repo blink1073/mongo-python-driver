@@ -16,22 +16,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
     NoReturn,
-    Optional,
-    Union,
     cast,
     overload,
 )
 
 from bson.codec_options import DEFAULT_CODEC_OPTIONS, CodecOptions
 from bson.dbref import DBRef
-from bson.timestamp import Timestamp
 from pymongo import _csot, common
 from pymongo.asynchronous.aggregation import _DatabaseAggregationCommand
 from pymongo.asynchronous.change_stream import AsyncDatabaseChangeStream
@@ -45,8 +41,11 @@ from pymongo.read_preferences import ReadPreference, _ServerMode
 from pymongo.typings import _CollationIn, _DocumentType, _DocumentTypeArg, _Pipeline
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, MutableMapping, Sequence
+
     import bson
     import bson.codec_options
+    from bson.timestamp import Timestamp
     from pymongo.asynchronous.client_session import AsyncClientSession
     from pymongo.asynchronous.mongo_client import AsyncMongoClient
     from pymongo.asynchronous.pool import AsyncConnection
@@ -62,10 +61,10 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
         self,
         client: AsyncMongoClient[_DocumentType],
         name: str,
-        codec_options: Optional[CodecOptions[_DocumentTypeArg]] = None,
-        read_preference: Optional[_ServerMode] = None,
-        write_concern: Optional[WriteConcern] = None,
-        read_concern: Optional[ReadConcern] = None,
+        codec_options: CodecOptions[_DocumentTypeArg] | None = None,
+        read_preference: _ServerMode | None = None,
+        write_concern: WriteConcern | None = None,
+        read_concern: ReadConcern | None = None,
     ) -> None:
         """Get a database by client and name.
 
@@ -149,26 +148,26 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     def with_options(
         self,
         codec_options: None = None,
-        read_preference: Optional[_ServerMode] = ...,
-        write_concern: Optional[WriteConcern] = ...,
-        read_concern: Optional[ReadConcern] = ...,
+        read_preference: _ServerMode | None = ...,
+        write_concern: WriteConcern | None = ...,
+        read_concern: ReadConcern | None = ...,
     ) -> AsyncDatabase[_DocumentType]: ...
 
     @overload
     def with_options(
         self,
         codec_options: bson.CodecOptions[_DocumentTypeArg],
-        read_preference: Optional[_ServerMode] = ...,
-        write_concern: Optional[WriteConcern] = ...,
-        read_concern: Optional[ReadConcern] = ...,
+        read_preference: _ServerMode | None = ...,
+        write_concern: WriteConcern | None = ...,
+        read_concern: ReadConcern | None = ...,
     ) -> AsyncDatabase[_DocumentTypeArg]: ...
 
     def with_options(
         self,
-        codec_options: Optional[CodecOptions[_DocumentTypeArg]] = None,
-        read_preference: Optional[_ServerMode] = None,
-        write_concern: Optional[WriteConcern] = None,
-        read_concern: Optional[ReadConcern] = None,
+        codec_options: CodecOptions[_DocumentTypeArg] | None = None,
+        read_preference: _ServerMode | None = None,
+        write_concern: WriteConcern | None = None,
+        read_concern: ReadConcern | None = None,
     ) -> AsyncDatabase[_DocumentType] | AsyncDatabase[_DocumentTypeArg]:
         """Get a clone of this database changing the specified settings.
 
@@ -209,12 +208,12 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
             read_concern or self.read_concern,
         )
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, AsyncDatabase):
             return self._client == other.client and self._name == other.name
         return NotImplemented
 
-    def __ne__(self, other: Any) -> bool:
+    def __ne__(self, other: object) -> bool:
         return not self == other
 
     def __hash__(self) -> int:
@@ -249,10 +248,10 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     def get_collection(
         self,
         name: str,
-        codec_options: Optional[CodecOptions[_DocumentTypeArg]] = None,
-        read_preference: Optional[_ServerMode] = None,
-        write_concern: Optional[WriteConcern] = None,
-        read_concern: Optional[ReadConcern] = None,
+        codec_options: CodecOptions[_DocumentTypeArg] | None = None,
+        read_preference: _ServerMode | None = None,
+        write_concern: WriteConcern | None = None,
+        read_concern: ReadConcern | None = None,
     ) -> AsyncCollection[_DocumentType]:
         """Get a :class:`~pymongo.asynchronous.collection.AsyncCollection` with the given name
         and options.
@@ -302,10 +301,10 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def _get_encrypted_fields(
         self, kwargs: Mapping[str, Any], coll_name: str, ask_db: bool
-    ) -> Optional[Mapping[str, Any]]:
+    ) -> Mapping[str, Any] | None:
         encrypted_fields = kwargs.get("encryptedFields")
         if encrypted_fields:
-            return cast(Mapping[str, Any], deepcopy(encrypted_fields))
+            return cast("Mapping[str, Any]", deepcopy(encrypted_fields))
         if (
             self.client.options.auto_encryption_opts
             and self.client.options.auto_encryption_opts._encrypted_fields_map
@@ -314,7 +313,7 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
             )
         ):
             return cast(
-                Mapping[str, Any],
+                "Mapping[str, Any]",
                 deepcopy(
                     self.client.options.auto_encryption_opts._encrypted_fields_map[
                         f"{self.name}.{coll_name}"
@@ -324,7 +323,7 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
         if ask_db and self.client.options.auto_encryption_opts:
             options = await self[coll_name].options()
             if options.get("encryptedFields"):
-                return cast(Mapping[str, Any], deepcopy(options["encryptedFields"]))
+                return cast("Mapping[str, Any]", deepcopy(options["encryptedFields"]))
         return None
 
     # See PYTHON-3084.
@@ -344,18 +343,18 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def watch(
         self,
-        pipeline: Optional[_Pipeline] = None,
-        full_document: Optional[str] = None,
-        resume_after: Optional[Mapping[str, Any]] = None,
-        max_await_time_ms: Optional[int] = None,
-        batch_size: Optional[int] = None,
-        collation: Optional[_CollationIn] = None,
-        start_at_operation_time: Optional[Timestamp] = None,
-        session: Optional[AsyncClientSession] = None,
-        start_after: Optional[Mapping[str, Any]] = None,
-        comment: Optional[Any] = None,
-        full_document_before_change: Optional[str] = None,
-        show_expanded_events: Optional[bool] = None,
+        pipeline: _Pipeline | None = None,
+        full_document: str | None = None,
+        resume_after: Mapping[str, Any] | None = None,
+        max_await_time_ms: int | None = None,
+        batch_size: int | None = None,
+        collation: _CollationIn | None = None,
+        start_at_operation_time: Timestamp | None = None,
+        session: AsyncClientSession | None = None,
+        start_after: Mapping[str, Any] | None = None,
+        comment: Any | None = None,
+        full_document_before_change: str | None = None,
+        show_expanded_events: bool | None = None,
     ) -> AsyncDatabaseChangeStream[_DocumentType]:
         """Watch changes on this database.
 
@@ -477,12 +476,12 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     async def create_collection(
         self,
         name: str,
-        codec_options: Optional[CodecOptions[_DocumentTypeArg]] = None,
-        read_preference: Optional[_ServerMode] = None,
-        write_concern: Optional[WriteConcern] = None,
-        read_concern: Optional[ReadConcern] = None,
-        session: Optional[AsyncClientSession] = None,
-        check_exists: Optional[bool] = True,
+        codec_options: CodecOptions[_DocumentTypeArg] | None = None,
+        read_preference: _ServerMode | None = None,
+        write_concern: WriteConcern | None = None,
+        read_concern: ReadConcern | None = None,
+        session: AsyncClientSession | None = None,
+        check_exists: bool | None = True,
         **kwargs: Any,
     ) -> AsyncCollection[_DocumentType]:
         """Create a new :class:`~pymongo.asynchronous.collection.AsyncCollection` in this
@@ -634,7 +633,7 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
             return coll
 
     async def aggregate(
-        self, pipeline: _Pipeline, session: Optional[AsyncClientSession] = None, **kwargs: Any
+        self, pipeline: _Pipeline, session: AsyncClientSession | None = None, **kwargs: Any
     ) -> AsyncCommandCursor[_DocumentType]:
         """Perform a database-level aggregation.
 
@@ -720,15 +719,15 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     async def _command(
         self,
         conn: AsyncConnection,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: int = 1,
         check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        allowable_errors: Sequence[str | int] | None = None,
         read_preference: _ServerMode = ReadPreference.PRIMARY,
         codec_options: CodecOptions[dict[str, Any]] = DEFAULT_CODEC_OPTIONS,
-        write_concern: Optional[WriteConcern] = None,
+        write_concern: WriteConcern | None = None,
         parse_write_concern_error: bool = False,
-        session: Optional[AsyncClientSession] = None,
+        session: AsyncClientSession | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]: ...
 
@@ -736,34 +735,33 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     async def _command(
         self,
         conn: AsyncConnection,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: int = 1,
         check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        allowable_errors: Sequence[str | int] | None = None,
         read_preference: _ServerMode = ReadPreference.PRIMARY,
         codec_options: CodecOptions[_CodecDocumentType] = ...,
-        write_concern: Optional[WriteConcern] = None,
+        write_concern: WriteConcern | None = None,
         parse_write_concern_error: bool = False,
-        session: Optional[AsyncClientSession] = None,
+        session: AsyncClientSession | None = None,
         **kwargs: Any,
     ) -> _CodecDocumentType: ...
 
     async def _command(
         self,
         conn: AsyncConnection,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: int = 1,
         check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
+        allowable_errors: Sequence[str | int] | None = None,
         read_preference: _ServerMode = ReadPreference.PRIMARY,
-        codec_options: Union[
-            CodecOptions[dict[str, Any]], CodecOptions[_CodecDocumentType]
-        ] = DEFAULT_CODEC_OPTIONS,
-        write_concern: Optional[WriteConcern] = None,
+        codec_options: CodecOptions[dict[str, Any]]
+        | CodecOptions[_CodecDocumentType] = DEFAULT_CODEC_OPTIONS,
+        write_concern: WriteConcern | None = None,
         parse_write_concern_error: bool = False,
-        session: Optional[AsyncClientSession] = None,
+        session: AsyncClientSession | None = None,
         **kwargs: Any,
-    ) -> Union[dict[str, Any], _CodecDocumentType]:
+    ) -> dict[str, Any] | _CodecDocumentType:
         """Internal command helper."""
         if isinstance(command, str):
             command = {command: value}
@@ -786,44 +784,44 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     @overload
     async def command(
         self,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: Any = 1,
         check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
-        read_preference: Optional[_ServerMode] = None,
+        allowable_errors: Sequence[str | int] | None = None,
+        read_preference: _ServerMode | None = None,
         codec_options: None = None,
-        session: Optional[AsyncClientSession] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]: ...
 
     @overload
     async def command(
         self,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: Any = 1,
         check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
-        read_preference: Optional[_ServerMode] = None,
+        allowable_errors: Sequence[str | int] | None = None,
+        read_preference: _ServerMode | None = None,
         codec_options: CodecOptions[_CodecDocumentType] = ...,
-        session: Optional[AsyncClientSession] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
     ) -> _CodecDocumentType: ...
 
     @_csot.apply
     async def command(
         self,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: Any = 1,
         check: bool = True,
-        allowable_errors: Optional[Sequence[Union[str, int]]] = None,
-        read_preference: Optional[_ServerMode] = None,
-        codec_options: Optional[bson.codec_options.CodecOptions[_CodecDocumentType]] = None,
-        session: Optional[AsyncClientSession] = None,
-        comment: Optional[Any] = None,
+        allowable_errors: Sequence[str | int] | None = None,
+        read_preference: _ServerMode | None = None,
+        codec_options: bson.codec_options.CodecOptions[_CodecDocumentType] | None = None,
+        session: AsyncClientSession | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
-    ) -> Union[dict[str, Any], _CodecDocumentType]:
+    ) -> dict[str, Any] | _CodecDocumentType:
         """Issue a MongoDB command.
 
         Send command `command` to the database and return the
@@ -926,11 +924,11 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
             read_preference = (session and session._txn_read_preference()) or ReadPreference.PRIMARY
 
         async def inner(
-            session: Optional[AsyncClientSession],
+            session: AsyncClientSession | None,
             _server: Server,
             conn: AsyncConnection,
             read_preference: _ServerMode,
-        ) -> Union[dict[str, Any], _CodecDocumentType]:
+        ) -> dict[str, Any] | _CodecDocumentType:
             return await self._command(
                 conn,
                 command,
@@ -950,13 +948,13 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     @_csot.apply
     async def cursor_command(
         self,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         value: Any = 1,
-        read_preference: Optional[_ServerMode] = None,
-        codec_options: Optional[CodecOptions[_CodecDocumentType]] = None,
-        session: Optional[AsyncClientSession] = None,
-        comment: Optional[Any] = None,
-        max_await_time_ms: Optional[int] = None,
+        read_preference: _ServerMode | None = None,
+        codec_options: CodecOptions[_CodecDocumentType] | None = None,
+        session: AsyncClientSession | None = None,
+        comment: Any | None = None,
+        max_await_time_ms: int | None = None,
         **kwargs: Any,
     ) -> AsyncCommandCursor[_DocumentType]:
         """Issue a MongoDB command and parse the response as a cursor.
@@ -1020,7 +1018,7 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
                 ) or ReadPreference.PRIMARY
 
             async def inner(
-                session: Optional[AsyncClientSession],
+                session: AsyncClientSession | None,
                 _server: Server,
                 conn: AsyncConnection,
                 read_preference: _ServerMode,
@@ -1057,15 +1055,15 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def _retryable_read_command(
         self,
-        command: Union[str, MutableMapping[str, Any]],
+        command: str | MutableMapping[str, Any],
         operation: str,
-        session: Optional[AsyncClientSession] = None,
+        session: AsyncClientSession | None = None,
     ) -> dict[str, Any]:
         """Same as command but used for retryable read commands."""
         read_preference = (session and session._txn_read_preference()) or ReadPreference.PRIMARY
 
         async def _cmd(
-            session: Optional[AsyncClientSession],
+            session: AsyncClientSession | None,
             _server: Server,
             conn: AsyncConnection,
             read_preference: _ServerMode,
@@ -1082,13 +1080,13 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     async def _list_collections(
         self,
         conn: AsyncConnection,
-        session: Optional[AsyncClientSession],
+        session: AsyncClientSession | None,
         read_preference: _ServerMode,
         **kwargs: Any,
     ) -> AsyncCommandCursor[MutableMapping[str, Any]]:
         """Internal listCollections helper."""
         coll = cast(
-            AsyncCollection[MutableMapping[str, Any]],
+            "AsyncCollection[MutableMapping[str, Any]]",
             self.get_collection("$cmd", read_preference=read_preference),
         )
         cmd = {"listCollections": 1, "cursor": {}}
@@ -1109,9 +1107,9 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def _list_collections_helper(
         self,
-        session: Optional[AsyncClientSession] = None,
-        filter: Optional[Mapping[str, Any]] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        filter: Mapping[str, Any] | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
     ) -> AsyncCommandCursor[MutableMapping[str, Any]]:
         """Get a cursor over the collections of this database.
@@ -1140,7 +1138,7 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
             kwargs["comment"] = comment
 
         async def _cmd(
-            session: Optional[AsyncClientSession],
+            session: AsyncClientSession | None,
             _server: Server,
             conn: AsyncConnection,
             read_preference: _ServerMode,
@@ -1155,9 +1153,9 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def list_collections(
         self,
-        session: Optional[AsyncClientSession] = None,
-        filter: Optional[Mapping[str, Any]] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        filter: Mapping[str, Any] | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
     ) -> AsyncCommandCursor[MutableMapping[str, Any]]:
         """Get a cursor over the collections of this database.
@@ -1192,9 +1190,9 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def _list_collection_names(
         self,
-        session: Optional[AsyncClientSession] = None,
-        filter: Optional[Mapping[str, Any]] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        filter: Mapping[str, Any] | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
     ) -> list[str]:
         if comment is not None:
@@ -1217,9 +1215,9 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def list_collection_names(
         self,
-        session: Optional[AsyncClientSession] = None,
-        filter: Optional[Mapping[str, Any]] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        filter: Mapping[str, Any] | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
     ) -> list[str]:
         """Get a list of all the collection names in this database.
@@ -1250,14 +1248,14 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
         return await self._list_collection_names(session, filter, comment, **kwargs)
 
     async def _drop_helper(
-        self, name: str, session: Optional[AsyncClientSession] = None, comment: Optional[Any] = None
+        self, name: str, session: AsyncClientSession | None = None, comment: Any | None = None
     ) -> dict[str, Any]:
         command = {"drop": name}
         if comment is not None:
             command["comment"] = comment
 
         async def inner(
-            session: Optional[AsyncClientSession], conn: AsyncConnection, _retryable_write: bool
+            session: AsyncClientSession | None, conn: AsyncConnection, _retryable_write: bool
         ) -> dict[str, Any]:
             return await self._command(
                 conn,
@@ -1273,10 +1271,10 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     @_csot.apply
     async def drop_collection(
         self,
-        name_or_collection: Union[str, AsyncCollection[_DocumentTypeArg]],
-        session: Optional[AsyncClientSession] = None,
-        comment: Optional[Any] = None,
-        encrypted_fields: Optional[Mapping[str, Any]] = None,
+        name_or_collection: str | AsyncCollection[_DocumentTypeArg],
+        session: AsyncClientSession | None = None,
+        comment: Any | None = None,
+        encrypted_fields: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Drop a collection.
 
@@ -1350,12 +1348,12 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
 
     async def validate_collection(
         self,
-        name_or_collection: Union[str, AsyncCollection[_DocumentTypeArg]],
+        name_or_collection: str | AsyncCollection[_DocumentTypeArg],
         scandata: bool = False,
         full: bool = False,
-        session: Optional[AsyncClientSession] = None,
-        background: Optional[bool] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        background: bool | None = None,
+        comment: Any | None = None,
     ) -> dict[str, Any]:
         """Validate a collection.
 
@@ -1415,7 +1413,7 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
                 raise CollectionInvalid(f"{name} invalid: {info}")
         # Sharded results
         elif "raw" in result:
-            for _, res in result["raw"].items():
+            for res in result["raw"].values():
                 if "result" in res:
                     info = res["result"]
                     if info.find("exception") != -1 or info.find("corrupt") != -1:
@@ -1435,10 +1433,10 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
     async def dereference(
         self,
         dbref: DBRef,
-        session: Optional[AsyncClientSession] = None,
-        comment: Optional[Any] = None,
+        session: AsyncClientSession | None = None,
+        comment: Any | None = None,
         **kwargs: Any,
-    ) -> Optional[_DocumentType]:
+    ) -> _DocumentType | None:
         """Dereference a :class:`~bson.dbref.DBRef`, getting the
         document it points to.
 

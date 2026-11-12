@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import os
 import sys
-import types
 import warnings
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 from pymongo.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    import types
 
 HAVE_SSL = True
 HAVE_PYSSL = True
@@ -90,15 +92,15 @@ if HAVE_SSL:
         return _ssl.HAS_SNI
 
     def get_ssl_context(
-        certfile: Optional[str],
-        passphrase: Optional[str],
-        ca_certs: Optional[str],
-        crlfile: Optional[str],
+        certfile: str | None,
+        passphrase: str | None,
+        ca_certs: str | None,
+        crlfile: str | None,
         allow_invalid_certificates: bool,
         allow_invalid_hostnames: bool,
         disable_ocsp_endpoint_check: bool,
         is_sync: bool,
-    ) -> Union[_pyssl.SSLContext, _ssl.SSLContext]:  # type: ignore[name-defined]
+    ) -> _pyssl.SSLContext | _ssl.SSLContext:  # type: ignore[name-defined]
         """Create and return an SSLContext object."""
         if is_sync and HAVE_PYSSL:
             ssl: types.ModuleType = _pyssl

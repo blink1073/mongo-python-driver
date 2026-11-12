@@ -21,13 +21,10 @@ import sys
 import time
 import traceback
 from collections import abc
-from collections.abc import Container, Iterable, Mapping, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
     NoReturn,
-    Optional,
-    Union,
 )
 
 from pymongo import ASCENDING
@@ -45,6 +42,8 @@ from pymongo.errors import (
 from pymongo.hello import HelloCompat
 
 if TYPE_CHECKING:
+    from collections.abc import Container, Iterable, Mapping, Sequence
+
     from pymongo.cursor_shared import _Hint
     from pymongo.operations import _IndexList
     from pymongo.pool_options import PoolOptions
@@ -128,7 +127,7 @@ class _RetryPolicy:
 
     def __init__(
         self,
-        attempts: Optional[int] = None,
+        attempts: int | None = None,
         backoff_initial: float = _BACKOFF_INITIAL,
         backoff_max: float = _BACKOFF_MAX,
     ):
@@ -139,7 +138,7 @@ class _RetryPolicy:
         self.backoff_initial = backoff_initial
         self.backoff_max = backoff_max
 
-    def backoff(self, attempt: int, base_backoff: Optional[float] = None) -> float:
+    def backoff(self, attempt: int, base_backoff: float | None = None) -> float:
         """Return the actual backoff duration for the given attempt and base backoff."""
         return _backoff(
             max(0, attempt),
@@ -177,7 +176,7 @@ def _get_timeout_details(options: PoolOptions) -> dict[str, float]:
     return details
 
 
-def format_timeout_details(details: Optional[dict[str, float]]) -> str:
+def format_timeout_details(details: dict[str, float] | None) -> str:
     result = ""
     if details:
         result += " (configured timeouts:"
@@ -195,8 +194,8 @@ def _gen_index_name(keys: _IndexList) -> str:
 
 
 def _index_list(
-    key_or_list: _Hint, direction: Optional[Union[int, str]] = None
-) -> Sequence[tuple[str, Union[int, str, Mapping[str, Any]]]]:
+    key_or_list: _Hint, direction: int | str | None = None
+) -> Sequence[tuple[str, int | str | Mapping[str, Any]]]:
     """Helper to generate a list of (key, direction) pairs.
 
     Takes such a list, or a single key, or a single key and direction.
@@ -266,10 +265,10 @@ def _validate_index_key_pair(key: Any, value: Any) -> None:
 
 def _check_command_response(
     response: _DocumentOut,
-    max_wire_version: Optional[int],
-    allowable_errors: Optional[Container[Union[int, str]]] = None,
+    max_wire_version: int | None,
+    allowable_errors: Container[int | str] | None = None,
     parse_write_concern_error: bool = False,
-    pool_opts: Optional[PoolOptions] = None,
+    pool_opts: PoolOptions | None = None,
 ) -> None:
     """Check the response to a command for errors."""
     if "ok" not in response:
@@ -343,7 +342,7 @@ def _raise_write_concern_error(error: Any) -> NoReturn:
     raise WriteConcernError(error.get("errmsg"), error.get("code"), error)
 
 
-def _get_wce_doc(result: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+def _get_wce_doc(result: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """Return the writeConcernError or None."""
     wce = result.get("writeConcernError")
     if wce:
@@ -370,7 +369,7 @@ def _check_write_command_response(result: Mapping[str, Any]) -> None:
 
 
 def _fields_list_to_dict(
-    fields: Union[Mapping[str, Any], Iterable[str]], option_name: str
+    fields: Mapping[str, Any] | Iterable[str], option_name: str
 ) -> Mapping[str, Any]:
     """Takes a sequence of field names and returns a matching dictionary.
 

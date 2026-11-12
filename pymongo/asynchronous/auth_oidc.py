@@ -17,11 +17,9 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 import time
-from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import bson
 from pymongo._csot import remaining
@@ -41,6 +39,9 @@ from pymongo.errors import OperationFailure
 from pymongo.lock import Lock, _async_create_lock
 
 if TYPE_CHECKING:
+    import threading
+    from collections.abc import Mapping, MutableMapping
+
     from pymongo.asynchronous.pool import AsyncConnection
     from pymongo.auth_shared import MongoCredential
 
@@ -54,7 +55,7 @@ class _OIDCAuthenticator(_OIDCAuthenticatorBase):
     else:
         lock: threading.Lock = field(default_factory=_async_create_lock)  # type: ignore[assignment, no-redef]
 
-    async def reauthenticate(self, conn: AsyncConnection) -> Optional[Mapping[str, Any]]:
+    async def reauthenticate(self, conn: AsyncConnection) -> Mapping[str, Any] | None:
         """Handle a reauthenticate from the server."""
         # Invalidate the token for the connection.
         self._invalidate(conn.oidc_token_gen_id)
@@ -63,7 +64,7 @@ class _OIDCAuthenticator(_OIDCAuthenticatorBase):
             return await self._authenticate_machine(conn)
         return await self._authenticate_human(conn)
 
-    async def authenticate(self, conn: AsyncConnection) -> Optional[Mapping[str, Any]]:
+    async def authenticate(self, conn: AsyncConnection) -> Mapping[str, Any] | None:
         """Handle an initial authenticate request."""
         # First handle speculative auth.
         # If it succeeded, we are done.
@@ -95,7 +96,7 @@ class _OIDCAuthenticator(_OIDCAuthenticatorBase):
                 raise
         return await self._sasl_start_jwt(conn)
 
-    async def _authenticate_human(self, conn: AsyncConnection) -> Optional[Mapping[str, Any]]:
+    async def _authenticate_human(self, conn: AsyncConnection) -> Mapping[str, Any] | None:
         # If we have a cached access token, try a JwtStepRequest.
         # authentication fails with error code 18, invalidate the access token,
         # and try to authenticate again.  If authentication fails for any other
@@ -128,9 +129,9 @@ class _OIDCAuthenticator(_OIDCAuthenticatorBase):
         # Attempt to authenticate with a JwtStepRequest.
         return await self._sasl_continue_jwt(conn, start_resp)
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(self) -> str | None:
         properties = self.properties
-        cb: Union[None, OIDCCallback]
+        cb: OIDCCallback | None
         resp: OIDCCallbackResult
 
         is_human = properties.human_callback is not None
@@ -180,7 +181,7 @@ class _OIDCAuthenticator(_OIDCAuthenticatorBase):
                 else:
                     resp = cb.fetch(context)
                 if not isinstance(resp, OIDCCallbackResult):
-                    raise ValueError(
+                    raise TypeError(
                         f"Callback result must be of type OIDCCallbackResult, not {type(resp)}"
                     )
                 self.refresh_token = resp.refresh_token
@@ -221,7 +222,7 @@ class _OIDCAuthenticator(_OIDCAuthenticatorBase):
 
 async def _authenticate_oidc(
     credentials: MongoCredential, conn: AsyncConnection, reauthenticate: bool
-) -> Optional[Mapping[str, Any]]:
+) -> Mapping[str, Any] | None:
     """Authenticate using MONGODB-OIDC."""
     authenticator = _get_authenticator(credentials, conn.address, _OIDCAuthenticator)
     if reauthenticate:

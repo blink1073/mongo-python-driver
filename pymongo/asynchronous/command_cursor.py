@@ -17,12 +17,10 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import AsyncIterator, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
     NoReturn,
-    Optional,
 )
 
 from bson import CodecOptions, _convert_raw_document_lists_to_streams
@@ -34,6 +32,8 @@ from pymongo.response import PinnedResponse
 from pymongo.typings import _Address, _DocumentType
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Mapping
+
     from pymongo.asynchronous.client_session import AsyncClientSession
     from pymongo.asynchronous.collection import AsyncCollection
     from pymongo.asynchronous.pool import AsyncConnection
@@ -165,7 +165,7 @@ class AsyncCommandCursor(
     async def __anext__(self) -> _DocumentType:
         return await self.next()
 
-    async def _try_next(self, get_more_allowed: bool) -> Optional[_DocumentType]:
+    async def _try_next(self, get_more_allowed: bool) -> _DocumentType | None:
         """Advance the cursor blocking for at most one getMore command."""
         if not len(self._data) and not self._killed and get_more_allowed:
             await self._refresh()
@@ -174,7 +174,7 @@ class AsyncCommandCursor(
         else:
             return None
 
-    async def _next_batch(self, result: list, total: Optional[int] = None) -> bool:  # type: ignore[type-arg]
+    async def _next_batch(self, result: list, total: int | None = None) -> bool:  # type: ignore[type-arg]
         """Get all or some available documents from the cursor."""
         if not len(self._data) and not self._killed:
             await self._refresh()
@@ -189,7 +189,7 @@ class AsyncCommandCursor(
         else:
             return False
 
-    async def try_next(self) -> Optional[_DocumentType]:
+    async def try_next(self) -> _DocumentType | None:
         """Advance the cursor without blocking indefinitely.
 
         This method returns the next document without waiting
@@ -215,10 +215,10 @@ class AsyncRawBatchCommandCursor(AsyncCommandCursor[_DocumentType]):
         self,
         collection: AsyncCollection[_DocumentType],
         cursor_info: Mapping[str, Any],
-        address: Optional[_Address],
+        address: _Address | None,
         batch_size: int = 0,
-        max_await_time_ms: Optional[int] = None,
-        session: Optional[AsyncClientSession] = None,
+        max_await_time_ms: int | None = None,
+        session: AsyncClientSession | None = None,
         comment: Any = None,
     ) -> None:
         """Create a new cursor / iterator over raw batches of BSON data.
@@ -243,9 +243,9 @@ class AsyncRawBatchCommandCursor(AsyncCommandCursor[_DocumentType]):
     def _unpack_response(  # type: ignore[override]
         self,
         response: _OpMsg,
-        cursor_id: Optional[int],
+        cursor_id: int | None,
         codec_options: CodecOptions[dict[str, Any]],
-        user_fields: Optional[Mapping[str, Any]] = None,
+        user_fields: Mapping[str, Any] | None = None,
         legacy_response: bool = False,
     ) -> list[Mapping[str, Any]]:
         raw_response = response.raw_response(cursor_id, user_fields=user_fields)

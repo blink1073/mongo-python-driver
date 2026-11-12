@@ -19,8 +19,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from bson.codec_options import _parse_codec_options
 from pymongo import common
@@ -39,6 +38,8 @@ from pymongo.ssl_support import get_ssl_context
 from pymongo.write_concern import WriteConcern, validate_boolean
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from bson.codec_options import CodecOptions
     from pymongo.auth_shared import MongoCredential
     from pymongo.encryption_options import AutoEncryptionOpts
@@ -47,8 +48,8 @@ if TYPE_CHECKING:
 
 
 def _parse_credentials(
-    username: str, password: str, database: Optional[str], options: Mapping[str, Any]
-) -> Optional[MongoCredential]:
+    username: str, password: str, database: str | None, options: Mapping[str, Any]
+) -> MongoCredential | None:
     """Parse authentication credentials."""
     mechanism = options.get("authmechanism", "DEFAULT" if username else None)
     source = options.get("authsource")
@@ -86,9 +87,7 @@ def _parse_read_concern(options: Mapping[str, Any]) -> ReadConcern:
     return ReadConcern(concern)
 
 
-def _parse_ssl_options(
-    options: Mapping[str, Any], is_sync: bool
-) -> tuple[Optional[SSLContext], bool]:
+def _parse_ssl_options(options: Mapping[str, Any], is_sync: bool) -> tuple[SSLContext | None, bool]:
     """Parse ssl options."""
     use_tls = options.get("tls")
     if use_tls is not None:
@@ -151,7 +150,7 @@ def _parse_ssl_options(
 def _parse_pool_options(
     username: str,
     password: str,
-    database: Optional[str],
+    database: str | None,
     options: Mapping[str, Any],
     is_sync: bool,
 ) -> PoolOptions:
@@ -166,7 +165,7 @@ def _parse_pool_options(
     connect_timeout = options.get("connecttimeoutms", common.CONNECT_TIMEOUT)
     socket_timeout = options.get("sockettimeoutms")
     wait_queue_timeout = options.get("waitqueuetimeoutms", common.WAIT_QUEUE_TIMEOUT)
-    event_listeners = cast(Optional[Sequence[_EventListener]], options.get("event_listeners"))
+    event_listeners = cast("Sequence[_EventListener] | None", options.get("event_listeners"))
     appname = options.get("appname")
     driver = options.get("driver")
     server_api = options.get("server_api")
@@ -209,7 +208,7 @@ class ClientOptions:
         self,
         username: str,
         password: str,
-        database: Optional[str],
+        database: str | None,
         options: Mapping[str, Any],
         is_sync: bool = True,
     ):
@@ -255,7 +254,7 @@ class ClientOptions:
         return self.__options
 
     @property
-    def connect(self) -> Optional[bool]:
+    def connect(self) -> bool | None:
         """Whether to begin discovering a MongoDB topology automatically."""
         return self.__connect
 
@@ -265,7 +264,7 @@ class ClientOptions:
         return self.__codec_options
 
     @property
-    def direct_connection(self) -> Optional[bool]:
+    def direct_connection(self) -> bool | None:
         """Whether to connect to the deployment in 'Single' topology."""
         return self.__direct_connection
 
@@ -299,7 +298,7 @@ class ClientOptions:
         return self.__read_preference
 
     @property
-    def replica_set_name(self) -> Optional[str]:
+    def replica_set_name(self) -> str | None:
         """Replica set name or None."""
         return self.__replica_set_name
 
@@ -314,7 +313,7 @@ class ClientOptions:
         return self.__read_concern
 
     @property
-    def timeout(self) -> Optional[float]:
+    def timeout(self) -> float | None:
         """The configured timeoutMS converted to seconds, or None.
 
         .. versionadded:: 4.2
@@ -332,12 +331,12 @@ class ClientOptions:
         return self.__retry_reads
 
     @property
-    def auto_encryption_opts(self) -> Optional[AutoEncryptionOpts]:
+    def auto_encryption_opts(self) -> AutoEncryptionOpts | None:
         """A :class:`~pymongo.encryption.AutoEncryptionOpts` or None."""
         return self.__auto_encryption_opts
 
     @property
-    def load_balanced(self) -> Optional[bool]:
+    def load_balanced(self) -> bool | None:
         """True if the client was configured to connect to a load balancer."""
         return self.__load_balanced
 

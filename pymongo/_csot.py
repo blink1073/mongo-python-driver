@@ -23,12 +23,14 @@ from collections import deque
 from collections.abc import Callable, MutableMapping
 from contextlib import AbstractContextManager
 from contextvars import ContextVar, Token
-from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from pymongo.write_concern import WriteConcern
 
-TIMEOUT: ContextVar[Optional[float]] = ContextVar("TIMEOUT", default=None)
+TIMEOUT: ContextVar[float | None] = ContextVar("TIMEOUT", default=None)
 RTT: ContextVar[float] = ContextVar("RTT", default=0.0)
 DEADLINE: ContextVar[float] = ContextVar("DEADLINE", default=float("inf"))
 
@@ -39,7 +41,7 @@ def reset_all() -> None:
     DEADLINE.set(float("inf"))
 
 
-def get_timeout() -> Optional[float]:
+def get_timeout() -> float | None:
     return TIMEOUT.get(None)
 
 
@@ -55,7 +57,7 @@ def set_rtt(rtt: float) -> None:
     RTT.set(rtt)
 
 
-def remaining() -> Optional[float]:
+def remaining() -> float | None:
     if not get_timeout():
         return None
     return DEADLINE.get() - time.monotonic()
@@ -78,9 +80,9 @@ class _TimeoutContext(AbstractContextManager[Any]):
           client.db.coll.insert_one({})
     """
 
-    def __init__(self, timeout: Optional[float]):
+    def __init__(self, timeout: float | None):
         self._timeout = timeout
-        self._tokens: Optional[tuple[Token[Optional[float]], Token[float], Token[float]]] = None
+        self._tokens: tuple[Token[float | None], Token[float], Token[float]] | None = None
 
     def __enter__(self) -> None:
         timeout_token = TIMEOUT.set(self._timeout)
@@ -90,7 +92,12 @@ class _TimeoutContext(AbstractContextManager[Any]):
         rtt_token = RTT.set(0.0)
         self._tokens = (timeout_token, deadline_token, rtt_token)
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if self._tokens:
             timeout_token, deadline_token, rtt_token = self._tokens
             TIMEOUT.reset(timeout_token)
@@ -125,12 +132,10 @@ def apply(func: F) -> F:
                         return func(self, *args, **kwargs)
             return func(self, *args, **kwargs)
 
-    return cast(F, csot_wrapper)
+    return cast("F", csot_wrapper)
 
 
-def apply_write_concern(
-    cmd: MutableMapping[str, Any], write_concern: Optional[WriteConcern]
-) -> None:
+def apply_write_concern(cmd: MutableMapping[str, Any], write_concern: WriteConcern | None) -> None:
     """Apply the given write concern to a command."""
     if not write_concern or write_concern.is_server_default:
         return
