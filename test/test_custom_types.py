@@ -145,9 +145,7 @@ class CustomBSONTypeTests:
 
     @no_type_check
     def test_decode_all(self):
-        documents = []
-        for dec in range(3):
-            documents.append({"average": Decimal(f"56.4{dec}")})
+        documents = [{"average": Decimal(f"56.4{dec}")} for dec in range(3)]
 
         bsonstream = b""
         for doc in documents:
@@ -181,7 +179,9 @@ class CustomBSONTypeTests:
     @no_type_check
     def test_decode_iter(self):
         expected, bson_data = self._generate_multidocument_bson_stream()
-        for expected_doc, decoded_doc in zip(expected, decode_iter(bson_data, self.codecopts)):
+        for expected_doc, decoded_doc in zip(
+            expected, decode_iter(bson_data, self.codecopts), strict=True
+        ):
             self.assertEqual(expected_doc, decoded_doc)
 
     @no_type_check
@@ -191,7 +191,9 @@ class CustomBSONTypeTests:
         fileobj.write(bson_data)
         fileobj.seek(0)
 
-        for expected_doc, decoded_doc in zip(expected, decode_file_iter(fileobj, self.codecopts)):
+        for expected_doc, decoded_doc in zip(
+            expected, decode_file_iter(fileobj, self.codecopts), strict=True
+        ):
             self.assertEqual(expected_doc, decoded_doc)
 
         fileobj.close()

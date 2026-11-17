@@ -18,30 +18,30 @@ from __future__ import annotations
 
 import errno
 import select
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 _HAVE_POLL = hasattr(select, "poll")
 _SelectError = getattr(select, "error", OSError)
 
 
-def _errno_from_exception(exc: BaseException) -> Optional[int]:
+def _errno_from_exception(exc: BaseException) -> int | None:
     if hasattr(exc, "errno"):
-        return cast(int, exc.errno)
+        return cast("int", exc.errno)
     if exc.args:
-        return cast(int, exc.args[0])
+        return cast("int", exc.args[0])
     return None
 
 
 class SocketChecker:
     def __init__(self) -> None:
-        self._poller: Optional[select.poll]
+        self._poller: select.poll | None
         if _HAVE_POLL:
             self._poller = select.poll()
         else:
             self._poller = None
 
     def select(
-        self, sock: Any, read: bool = False, write: bool = False, timeout: Optional[float] = 0
+        self, sock: Any, read: bool = False, write: bool = False, timeout: float | None = 0
     ) -> bool:
         """Select for reads or writes with a timeout in seconds (or None).
 

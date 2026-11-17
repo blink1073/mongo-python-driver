@@ -1,11 +1,36 @@
 Changelog
 =========
 
-Changes in Version 4.20.0 (2026/XX/XX)
+Changes in Version 4.20.1 (2026/XX/XX)
+--------------------------------------
+
+Version 4.20.1 is a bug fix release.
+
+Bug fixes
+.........
+
+- Fixed a bug where ``getMore`` commands in load-balanced mode were not
+  retried when the server returned a retryable overload error
+  (`PYTHON-6262`_).
+
+.. _PYTHON-6262: https://jira.mongodb.org/browse/PYTHON-6262
+
+Changes in Version 4.20.0 (2026/11/12)
 --------------------------------------
 
 - The client handshake metadata now reports a detected coding agent in
   ``client.env.agent`` (`PYTHON-5929`_).
+- Removed the beta ``QueryType.PREFIXPREVIEW``, ``QueryType.SUFFIXPREVIEW``,
+  and ``QueryType.SUBSTRINGPREVIEW`` query types. Use
+  :attr:`~pymongo.encryption.QueryType.PREFIX`,
+  :attr:`~pymongo.encryption.QueryType.SUFFIX`, and
+  :attr:`~pymongo.encryption.QueryType.SUBSTRING` instead (requires MongoDB
+  9.0+ and pymongocrypt 1.21.0+) (`PYTHON-5959`_).
+- Removed the deprecated ``text_opts`` parameter of
+  :meth:`~pymongo.encryption.ClientEncryption.encrypt` and
+  :meth:`~pymongo.asynchronous.encryption.AsyncClientEncryption.encrypt`, and
+  the ``TextOpts`` class. Use ``string_opts`` and
+  :class:`~pymongo.encryption_options.StringOpts` instead (`PYTHON-5959`_).
 
 Bug fixes
 .........
@@ -34,13 +59,31 @@ Bug fixes
   due to a CPython memory leak bug (`python/cpython#116810 <https://github.com/python/cpython/issues/116810>`_).
   The bug was fixed in Python 3.12.7 and Python 3.13.1.
   Users of Python 3.12 and 3.13 should upgrade to at least those versions (`PYTHON-6182`_).
+- Fixed a bug where ``AsyncMongoClient`` could not recover after a replica set
+  member removed itself from the topology with its own ``hello`` response (for
+  example, during a node restart): the monitor's executor cancelled its own
+  task, so the monitor never ran again (`PYTHON-6226`_).
+- Fixed undefined behavior in the C extension's BSON buffer growth: growing
+  an encode buffer past 1GiB doubled a signed integer past its limit.
+  Over-limit encodes still raise ``ValueError`` (`PYTHON-6252`_).
 
 .. _PYTHON-5929: https://jira.mongodb.org/browse/PYTHON-5929
+.. _PYTHON-5959: https://jira.mongodb.org/browse/PYTHON-5959
 .. _PYTHON-6172: https://jira.mongodb.org/browse/PYTHON-6172
 .. _PYTHON-6149: https://jira.mongodb.org/browse/PYTHON-6149
 .. _PYTHON-5873: https://jira.mongodb.org/browse/PYTHON-5873
 .. _PYTHON-6145: https://jira.mongodb.org/browse/PYTHON-6145
 .. _PYTHON-6182: https://jira.mongodb.org/browse/PYTHON-6182
+.. _PYTHON-6226: https://jira.mongodb.org/browse/PYTHON-6226
+.. _PYTHON-6252: https://jira.mongodb.org/browse/PYTHON-6252
+
+Issues Resolved
+...............
+
+See the `PyMongo 4.20.0 release notes in JIRA`_ for the list of resolved issues
+in this release.
+
+.. _PyMongo 4.20.0 release notes in JIRA: https://jira.mongodb.org/secure/ReleaseNote.jspa?projectId=10004&version=52954
 
 Changes in Version 4.19.0 (2026/10/14)
 --------------------------------------

@@ -86,8 +86,10 @@ Classes
 
 from __future__ import annotations
 
-from collections.abc import MutableMapping
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import MutableMapping
 
 
 class ServerApiVersion:
@@ -104,7 +106,7 @@ class ServerApi:
     """MongoDB Stable API."""
 
     def __init__(
-        self, version: str, strict: Optional[bool] = None, deprecation_errors: Optional[bool] = None
+        self, version: str, strict: bool | None = None, deprecation_errors: bool | None = None
     ):
         """Options to configure MongoDB Stable API.
 
@@ -143,7 +145,7 @@ class ServerApi:
         return self._version
 
     @property
-    def strict(self) -> Optional[bool]:
+    def strict(self) -> bool | None:
         """The API strict mode setting.
 
         When set, this value is sent to the server in the "apiStrict" field.
@@ -151,7 +153,7 @@ class ServerApi:
         return self._strict
 
     @property
-    def deprecation_errors(self) -> Optional[bool]:
+    def deprecation_errors(self) -> bool | None:
         """The API deprecation errors setting.
 
         When set, this value is sent to the server in the
@@ -160,7 +162,7 @@ class ServerApi:
         return self._deprecation_errors
 
 
-def _add_to_command(cmd: MutableMapping[str, Any], server_api: Optional[ServerApi]) -> None:
+def _add_to_command(cmd: MutableMapping[str, Any], server_api: ServerApi | None) -> None:
     """Internal helper which adds API versioning options to a command.
 
     :param cmd: The command.

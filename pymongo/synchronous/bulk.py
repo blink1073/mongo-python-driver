@@ -20,13 +20,10 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator, Mapping, MutableMapping
 from itertools import islice
 from typing import (
     TYPE_CHECKING,
     Any,
-    Optional,
-    Union,
 )
 
 from pymongo import _csot
@@ -51,7 +48,6 @@ from pymongo.message import (
     _EncryptedBulkWriteContext,
 )
 from pymongo.read_preferences import ReadPreference
-from pymongo.synchronous.client_session import ClientSession
 from pymongo.synchronous.command_runner import (
     run_bulk_write_command,
 )
@@ -59,6 +55,9 @@ from pymongo.synchronous.helpers import _handle_reauth
 from pymongo.write_concern import WriteConcern
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, MutableMapping
+
+    from pymongo.synchronous.client_session import ClientSession
     from pymongo.synchronous.collection import Collection
     from pymongo.synchronous.mongo_client import MongoClient
     from pymongo.synchronous.pool import Connection
@@ -101,7 +100,7 @@ class _Bulk(_AgnosticBulkBase):
         max_doc_size: int,
         docs: list[Mapping[str, Any]],
         client: MongoClient[Any],
-    ) -> Optional[Mapping[str, Any]]:
+    ) -> Mapping[str, Any] | None:
         """Send an unacknowledged batch write command."""
         # Historically the STARTED log omits the documents while the published
         # CommandStartedEvent includes them, so log ``cmd`` but publish a copy
@@ -122,7 +121,7 @@ class _Bulk(_AgnosticBulkBase):
 
     def _execute_batch_unack(
         self,
-        bwc: Union[_BulkWriteContext, _EncryptedBulkWriteContext],
+        bwc: _BulkWriteContext | _EncryptedBulkWriteContext,
         cmd: dict[str, Any],
         ops: list[Mapping[str, Any]],
         client: MongoClient[Any],
@@ -149,7 +148,7 @@ class _Bulk(_AgnosticBulkBase):
 
     def _execute_batch(
         self,
-        bwc: Union[_BulkWriteContext, _EncryptedBulkWriteContext],
+        bwc: _BulkWriteContext | _EncryptedBulkWriteContext,
         cmd: dict[str, Any],
         ops: list[Mapping[str, Any]],
         client: MongoClient[Any],
@@ -173,12 +172,12 @@ class _Bulk(_AgnosticBulkBase):
         self,
         generator: Iterator[Any],
         write_concern: WriteConcern,
-        session: Optional[ClientSession],
+        session: ClientSession | None,
         conn: Connection,
-        op_id: Optional[int],
+        op_id: int | None,
         retryable: bool,
         full_result: MutableMapping[str, Any],
-        final_write_concern: Optional[WriteConcern] = None,
+        final_write_concern: WriteConcern | None = None,
     ) -> None:
         db_name = self.collection.database.name
         client = self.collection.database.client
@@ -276,7 +275,7 @@ class _Bulk(_AgnosticBulkBase):
         self,
         generator: Iterator[Any],
         write_concern: WriteConcern,
-        session: Optional[ClientSession],
+        session: ClientSession | None,
         operation: str,
     ) -> dict[str, Any]:
         """Execute using write commands."""
@@ -295,7 +294,7 @@ class _Bulk(_AgnosticBulkBase):
         op_id = _generate_op_id_or_none(client._event_listeners)
 
         def retryable_bulk(
-            session: Optional[ClientSession], conn: Connection, retryable: bool
+            session: ClientSession | None, conn: Connection, retryable: bool
         ) -> None:
             self._execute_command(
                 generator,
@@ -423,7 +422,7 @@ class _Bulk(_AgnosticBulkBase):
     def execute(
         self,
         write_concern: WriteConcern,
-        session: Optional[ClientSession],
+        session: ClientSession | None,
         operation: str,
     ) -> Any:
         """Execute operations."""

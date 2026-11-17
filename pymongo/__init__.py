@@ -16,9 +16,6 @@
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from typing import Optional
-
 __all__ = [
     "ASCENDING",
     "DESCENDING",
@@ -115,13 +112,17 @@ from pymongo import client_session  # noqa: F401
 from pymongo import collection  # noqa: F401
 from pymongo import command_cursor  # noqa: F401
 from pymongo import database  # noqa: F401
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 # isort: on
 
 version = __version__
 """Current version of PyMongo."""
 
 
-def timeout(seconds: Optional[float]) -> AbstractContextManager[None]:
+def timeout(seconds: float | None) -> AbstractContextManager[None]:
     """**(Provisional)** Apply the given timeout for a block of operations.
 
     .. note:: :func:`~pymongo.timeout` is currently provisional. Backwards

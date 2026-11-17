@@ -90,9 +90,7 @@ class TestAsyncChangeStreamBase(AsyncIntegrationTest):
 
     def generate_unique_collnames(self, numcolls):
         """Generate numcolls collection names unique to a test."""
-        collnames = []
-        for idx in range(1, numcolls + 1):
-            collnames.append(self.id() + "_" + str(idx))
+        collnames = [self.id() + "_" + str(idx) for idx in range(1, numcolls + 1)]
         return collnames
 
     async def get_resume_token(self, invalidate=False):
@@ -1090,7 +1088,7 @@ class TestAllLegacyScenarios(AsyncIntegrationTest):
         element in superlist.
         """
         self.assertEqual(len(superlist), len(sublist))
-        for sup, sub in zip(superlist, sublist):
+        for sup, sub in zip(superlist, sublist, strict=True):
             if isinstance(sub, dict):
                 self.assert_dict_is_subset(sup, sub)
                 continue

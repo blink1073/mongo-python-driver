@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import sys
 import uuid
-from typing import Any, Optional
-
-from pymongo.synchronous.mongo_client import MongoClient
+from typing import TYPE_CHECKING, Any
 
 sys.path[0:0] = [""]
 
@@ -30,10 +28,13 @@ from bson.objectid import ObjectId
 from pymongo.common import partition_node
 from pymongo.errors import BulkWriteError, ConfigurationError, InvalidOperation, OperationFailure
 from pymongo.operations import *
-from pymongo.synchronous.collection import Collection
 from pymongo.write_concern import WriteConcern
 from test import IntegrationTest, client_context, remove_all_users, unittest
 from test.utils_shared import wait_until
+
+if TYPE_CHECKING:
+    from pymongo.synchronous.collection import Collection
+    from pymongo.synchronous.mongo_client import MongoClient
 
 _IS_SYNC = True
 
@@ -63,7 +64,7 @@ class BulkTestBase(IntegrationTest):
                     % (len(expected_upserts), len(actual_upserts)),
                 )
 
-                for e, a in zip(expected_upserts, actual_upserts):
+                for e, a in zip(expected_upserts, actual_upserts, strict=True):
                     self.assertEqualUpsert(e, a)
 
             elif key == "writeErrors":
@@ -76,7 +77,7 @@ class BulkTestBase(IntegrationTest):
                     % (len(expected_errors), len(actual_errors)),
                 )
 
-                for e, a in zip(expected_errors, actual_errors):
+                for e, a in zip(expected_errors, actual_errors, strict=True):
                     self.assertEqualWriteError(e, a)
 
             else:
@@ -309,8 +310,7 @@ class TestBulk(BulkTestBase):
             {"_id": 3, "l": "s" * (_16_MB - 10000)},
         ]
         # Fill in the remaining ~10000 bytes with small documents.
-        for i in range(4, 10000):
-            docs.append({"_id": i})
+        docs.extend({"_id": i} for i in range(4, 10000))
         result = self.coll.insert_many(docs)
         self.assertEqual(len(docs), len(result.inserted_ids))
 
@@ -922,7 +922,7 @@ class TestBulkAuthorization(BulkAuthorizationTestBase):
 
 
 class TestBulkWriteConcern(BulkTestBase):
-    w: Optional[int]
+    w: int | None
     secondary: MongoClient
 
     def setUp(self):
